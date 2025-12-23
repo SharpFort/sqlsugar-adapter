@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0;net9.0;net8.0;</TargetFrameworks>
+    <LangVersion>9.0</LangVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>Casbin.NET.SqlSugar</PackageId>
+    <PackageIcon>casbin.png</PackageIcon>
+    <Authors>Casbin.NET</Authors>
+    <RepositoryType>GIT</RepositoryType>
+    <RepositoryUrl>https://github.com/casbin-net/sqlSugar-adapter</RepositoryUrl>
+    <Copyright>Apache License 2.0</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/casbin-net/sqlSugar-adapter</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Casbin.NET" Version="2.19.1" />
+    <PackageReference Include="SqlSugarCore" Version="5.1.4.167" />
+    <PackageReference Include="Npgsql" Version="8.0.5" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <None Include="casbin.png" Pack="true" Visible="false" PackagePath="" />
+  </ItemGroup>
+
+</Project>
