@@ -333,3 +333,6 @@ ASALocalRun/
 .mfractor/
 .vscode/
 nul
+
+.idx/
+dev.nix
