@@ -270,41 +270,6 @@ namespace Casbin.Adapter.SqlSugar
 
         #region 内部 Save 事务处理方法
 
-        #region SavePolicyWithSharedTransaction - 原始版本（已注释）
-        // 【集成测试多 Schema 支持 - 2024/12/21】以下为原始实现，因不支持多 Schema 场景已被替换
-        // private void SavePolicyWithSharedTransaction_Original(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
-        // {
-        //     var primaryClient = rulesByClient.First().Key;
-        //     
-        //     try
-        //     {
-        //         primaryClient.Ado.BeginTran();
-        //         
-        //         foreach (var client in _clientProvider.GetAllClients().Distinct())
-        //         {
-        //             client.Deleteable<CasbinRule>().ExecuteCommand();
-        //         }
-        //         
-        //         foreach (var group in rulesByClient)
-        //         {
-        //             var client = group.Key;
-        //             var rules = OnSavePolicy(store, group).ToList();
-        //             if (rules.Any())
-        //             {
-        //                 client.Insertable(rules).ExecuteCommand();
-        //             }
-        //         }
-        //         
-        //         primaryClient.Ado.CommitTran();
-        //     }
-        //     catch
-        //     {
-        //         primaryClient.Ado.RollbackTran();
-        //         throw;
-        //     }
-        // }
-        #endregion
-
         /// <summary>
         /// 【集成测试多 Schema 支持 - 2024/12/21 重构】
         /// 使用共享事务保存策略到多个 Schema/表（同步版本）。
@@ -367,42 +332,6 @@ namespace Casbin.Adapter.SqlSugar
                 throw;
             }
         }
-
-        #region SavePolicyWithSharedTransactionAsync - 原始版本（已注释）
-        // 【集成测试多 Schema 支持 - 2024/12/21】以下为原始实现，因不支持多 Schema 场景已被替换
-        // 原始代码在单 Schema 场景下可正常工作，但无法处理 PostgreSQL 多 Schema 分布的情况
-        // private async Task SavePolicyWithSharedTransactionAsync_Original(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
-        // {
-        //     var primaryClient = rulesByClient.First().Key;
-        //     
-        //     try
-        //     {
-        //         primaryClient.Ado.BeginTran();
-        //         
-        //         foreach (var client in _clientProvider.GetAllClients().Distinct())
-        //         {
-        //             await client.Deleteable<CasbinRule>().ExecuteCommandAsync();
-        //         }
-        //         
-        //         foreach (var group in rulesByClient)
-        //         {
-        //             var client = group.Key;
-        //             var rules = OnSavePolicy(store, group).ToList();
-        //             if (rules.Any())
-        //             {
-        //                 await client.Insertable(rules).ExecuteCommandAsync();
-        //             }
-        //         }
-        //         
-        //         primaryClient.Ado.CommitTran();
-        //     }
-        //     catch
-        //     {
-        //         primaryClient.Ado.RollbackTran();
-        //         throw;
-        //     }
-        // }
-        #endregion
 
         /// <summary>
         /// 【集成测试多 Schema 支持 - 2024/12/21 重构】
@@ -479,40 +408,6 @@ namespace Casbin.Adapter.SqlSugar
             }
         }
 
-        #region SavePolicyWithSeparateTransactions - 原始版本（已注释）
-        // 【集成测试多 Schema 支持 - 2024/12/21】以下为原始实现
-        // private void SavePolicyWithSeparateTransactions_Original(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
-        // {
-        //     var allClients = _clientProvider.GetAllClients().Distinct().ToList();
-        //     
-        //     foreach (var client in allClients)
-        //     {
-        //         try
-        //         {
-        //             client.Ado.BeginTran();
-        //             client.Deleteable<CasbinRule>().ExecuteCommand();
-        //             
-        //             var rules = rulesByClient.FirstOrDefault(g => g.Key == client);
-        //             if (rules != null)
-        //             {
-        //                 var rulesToSave = OnSavePolicy(store, rules).ToList();
-        //                 if (rulesToSave.Any())
-        //                 {
-        //                     client.Insertable(rulesToSave).ExecuteCommand();
-        //                 }
-        //             }
-        //             
-        //             client.Ado.CommitTran();
-        //         }
-        //         catch
-        //         {
-        //             client.Ado.RollbackTran();
-        //             throw;
-        //         }
-        //     }
-        // }
-        #endregion
-
         /// <summary>
         /// 【集成测试多 Schema 支持 - 2024/12/21 重构】
         /// 使用独立事务保存策略到多个 Schema/表（同步版本）。
@@ -572,41 +467,6 @@ namespace Casbin.Adapter.SqlSugar
                 throw new AggregateException("One or more save operations failed", exceptions);
             }
         }
-
-
-        #region SavePolicyWithSeparateTransactionsAsync - 原始版本（已注释）
-        // 【集成测试多 Schema 支持 - 2024/12/21】以下为原始实现
-        // private async Task SavePolicyWithSeparateTransactionsAsync_Original(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
-        // {
-        //     var allClients = _clientProvider.GetAllClients().Distinct().ToList();
-        //     
-        //     foreach (var client in allClients)
-        //     {
-        //         try
-        //         {
-        //             client.Ado.BeginTran();
-        //             await client.Deleteable<CasbinRule>().ExecuteCommandAsync();
-        //             
-        //             var rules = rulesByClient.FirstOrDefault(g => g.Key == client);
-        //             if (rules != null)
-        //             {
-        //                 var rulesToSave = OnSavePolicy(store, rules).ToList();
-        //                 if (rulesToSave.Any())
-        //                 {
-        //                     await client.Insertable(rulesToSave).ExecuteCommandAsync();
-        //                 }
-        //             }
-        //             
-        //             client.Ado.CommitTran();
-        //         }
-        //         catch
-        //         {
-        //             client.Ado.RollbackTran();
-        //             throw;
-        //         }
-        //     }
-        // }
-        #endregion
 
         /// <summary>
         /// 【集成测试多 Schema 支持 - 2024/12/21 重构】
@@ -675,8 +535,7 @@ namespace Casbin.Adapter.SqlSugar
                 throw new AggregateException("One or more save operations failed", exceptions);
             }
         }
-
-
+        
         #endregion
     }
 }
