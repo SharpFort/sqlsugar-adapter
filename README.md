@@ -1,176 +1,82 @@
-# SqlSugar Adapter
+# 🛡️ Casbin.NET SqlSugar Adapter
 
-[![Build Status](https://github.com/SharpFort/sqlsugar-adapter/workflows/Build/badge.svg)](https://github.com/SharpFort/sqlsugar-adapter/actions)
-[![Coverage Status](https://coveralls.io/repos/github/SharpFort/sqlsugar-adapter/badge.svg?branch=master)](https://coveralls.io/github/SharpFort/sqlsugar-adapter?branch=master)
-[![Nuget](https://img.shields.io/nuget/v/Casbin.NET.Adapter.SqlSugar.svg)](https://www.nuget.org/packages/Casbin.NET.Adapter.SqlSugar/)
-[![Release](https://img.shields.io/github/release/SharpFort/sqlsugar-adapter.svg)](https://github.com/SharpFort/sqlsugar-adapter/releases/latest)
-[![Nuget](https://img.shields.io/nuget/dt/Casbin.NET.Adapter.SqlSugar.svg)](https://www.nuget.org/packages/Casbin.NET.Adapter.SqlSugar/)
-[![Discord](https://img.shields.io/discord/1022748306096537660?logo=discord&label=discord&color=5865F2)](https://discord.gg/S5UjpzGZjN)
+[![NuGet](https://img.shields.io/nuget/v/Casbin.NET.Adapter.SqlSugar)](https://www.nuget.org/packages/Casbin.NET.Adapter.SqlSugar)
+[![License](https://img.shields.io/github/license/SharpFort/sqlsugar-adapter)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0%20%7C%2010.0-512BD4)](https://dotnet.microsoft.com/)
 
-SqlSugar Adapter is the [SqlSugar](https://github.com/sunkaixuan/SqlSugar) adapter for [Casbin](https://github.com/casbin/casbin). With this library, Casbin can load policy from SqlSugar supported databases or save policy to them.
+The [SqlSugar](https://github.com/sunkaixuan/SqlSugar) adapter for [Casbin.NET](https://github.com/casbin/Casbin.NET).
+Efficiently load and save Casbin policies from any SqlSugar-supported database.
 
-The current version supports all databases which SqlSugar supports, including:
+## 📚 Documentation
 
-- MySQL, MariaDB
-- SQL Server
-- PostgreSQL
-- SQLite
-- Oracle
-- Db2
-- And more...
+| Document | Description |
+|----------|-------------|
+| [**Usage Guide**](MULTI_CONTEXT_USAGE_GUIDE.md) | 🚀 **Start Here!** Step-by-step guide for basic and multi-context setup. |
+| [**Design Document**](MULTI_CONTEXT_DESIGN.md) | 🧠 Technical architecture validation and deep dive. |
+| [**Integration Tests**](Casbin.Adapter.SqlSugar.IntegrationTest/Integration/README.md) | 🧪 How to run transaction integrity tests. |
+| [**Multi-Tenant Guide**](MULTI_TENANT_GUIDE.md) | 🏢 Strategies for multi-tenant applications. |
+| [**中文文档**](README_zh.md) | 🇨🇳 Switch to Chinese Documentation. |
 
-## Installation
+## ✨ Features
+
+- 🔌 **Universal Support**: Works with MySQL, SQL Server, PostgreSQL, SQLite, Oracle, and more.
+- ⚛️ **Atomic Transactions**: Full support for multi-context transactional integrity.
+- 🚀 **Performance**: Optimized for high-throughput policy evaluation.
+- 🎯 **Targets**: Native support for .NET 8.0, 9.0, and 10.0.
+
+## 📦 Installation
+
+```xml
+<PackageReference Include="Casbin.NET.Adapter.SqlSugar" Version="x.x.x" />
+```
+
+Or via CLI:
 
 ```bash
 dotnet add package Casbin.NET.Adapter.SqlSugar
 ```
 
-## Supported Frameworks
+## 🚀 Quick Start
 
-The adapter supports the following .NET target frameworks:
-- .NET 10.0
-- .NET 9.0
-- .NET 8.0
-
-## Simple Example
+### 1. Simple Usage
 
 ```csharp
 using Casbin.Adapter.SqlSugar;
 using SqlSugar;
-using NetCasbin;
+using Casbin.NET;
 
-namespace ConsoleAppExample
+// 1. Configure SqlSugar
+var sqlSugar = new SqlSugarClient(new ConnectionConfig
 {
-    public class Program
-    {
-        public static void Main(string[] args)
-        {
-            // Initialize SqlSugarClient
-            var connectionConfig = new ConnectionConfig()
-            {
-                ConnectionString = "Data Source=casbin_example.sqlite3",
-                DbType = DbType.Sqlite,
-                IsAutoCloseConnection = true,
-                InitKeyType = InitKeyType.Attribute
-            };
-            var dbClient = new SqlSugarClient(connectionConfig);
+    ConnectionString = "...",
+    DbType = DbType.MySql,
+    IsAutoCloseConnection = true,
+    InitKeyType = InitKeyType.Attribute
+});
 
-            // Optional: Create database and tables automatically
-            // dbClient.DbMaintenance.CreateDatabase(); 
-            // The adapter can also handle table creation if autoCodeFirst is true (default).
+// 2. Create Adapter
+var adapter = new SqlSugarAdapter(sqlSugar);
 
-            // Initialize a SqlSugar adapter and use it in a Casbin enforcer:
-            var adapter = new SqlSugarAdapter(dbClient);
-            var e = new Enforcer("examples/rbac_model.conf", adapter);
+// 3. Initialize Enforcer
+var enforcer = new Enforcer("path/to/model.conf", adapter);
 
-            // Load the policy from DB.
-            e.LoadPolicy();
-
-            // Check the permission.
-            e.Enforce("alice", "data1", "read");
-            
-            // Modify the policy.
-            // e.AddPolicy(...)
-            // e.RemovePolicy(...)
-	
-            // Save the policy back to DB.
-            e.SavePolicy();
-        }
-    }
+// 4. Load & Check
+await enforcer.LoadPolicyAsync();
+if (await enforcer.EnforceAsync("alice", "data1", "read")) 
+{
+    // Access granted
 }
 ```
 
-## Using with Dependency Injection
-
-When using the adapter with dependency injection (e.g., in ASP.NET Core), you can register `ISqlSugarClient` (or `ISqlSugarClientProvider` for advanced scenarios) and the adapter.
-
-### Recommended Approach
+### 2. Dependency Injection (ASP.NET Core)
 
 ```csharp
-using Casbin.Adapter.SqlSugar;
-using SqlSugar;
-using NetCasbin;
-using Microsoft.Extensions.DependencyInjection;
-
-// Register SqlSugarClient (Scoped recommended for web apps)
-services.AddScoped<ISqlSugarClient>(sp =>
-{
-    return new SqlSugarClient(new ConnectionConfig
-    {
-        ConnectionString = "YourConnectionString",
-        DbType = DbType.SqlServer,
-        IsAutoCloseConnection = true
-    });
-});
-
-// Register the adapter
+// In Program.cs
+services.AddScoped<ISqlSugarClient>(sp => ...); // Register your SqlSugar client
 services.AddScoped<IAdapter, SqlSugarAdapter>();
-
-// Register the Enforcer
-services.AddScoped<IEnforcer>(sp =>
+services.AddScoped<IEnforcer>(sp => 
 {
     var adapter = sp.GetRequiredService<IAdapter>();
-    return new Enforcer("examples/rbac_model.conf", adapter);
+    return new Enforcer("model.conf", adapter);
 });
 ```
-
-## Multi-Context Support
-
-The adapter supports storing different policy types in separate database contexts (schemas or tables), allowing you to:
-- Store policies (p, p2, etc.) and groupings (g, g2, etc.) in different schemas and/or tables
-- Separate data for multi-tenant or compliance scenarios
-
-### Quick Example
-
-To use multi-context support, implement `ISqlSugarClientProvider` or populate a `DefaultSqlSugarClientProvider`.
-
-```csharp
-// Example using a custom provider for multi-schema support
-public class MyClientProvider : ISqlSugarClientProvider
-{
-    private readonly ISqlSugarClient _client; // Using shared connection
-    
-    public MyClientProvider(ISqlSugarClient client) { _client = client; }
-
-    public ISqlSugarClient GetClientForPolicyType(string policyType) => _client;
-
-    public IEnumerable<ISqlSugarClient> GetAllClients() => new[] { _client };
-    
-    public System.Data.Common.DbConnection? GetSharedConnection() => _client.Ado.Connection;
-    
-    public string? GetTableNameForPolicyType(string policyType)
-    {
-         // Route different policies to different tables/schemas
-         return policyType.StartsWith("g") ? "groupings.casbin_rule" : "policies.casbin_rule";
-    }
-    
-    public bool SharesConnection => true;
-}
-
-// Usage
-var provider = new MyClientProvider(dbClient);
-var adapter = new SqlSugarAdapter(provider);
-```
-
-> **⚠️ Transaction Integrity Requirements**
->
-> For atomic multi-context operations:
-> 1. **Share DbConnection:** All contexts must use the **same `DbConnection` object**.
-> 2. **Disable AutoSave:** Use `enforcer.EnableAutoSave(false)` and call `SavePolicyAsync()` to batch commit.
->
-> See detailed usage in the documentation.
-
-### Documentation
-
-- **[Multi-Context Usage Guide](MULTI_CONTEXT_USAGE_GUIDE.md)** - Complete step-by-step guide
-- **[Multi-Context Design](MULTI_CONTEXT_DESIGN.md)** - Detailed design documentation
-- **[Integration Tests Setup](Casbin.Adapter.SqlSugar.IntegrationTest/Integration/README.md)** - How to run transaction integrity tests locally
-
-## Getting Help
-
-- [Casbin.NET](https://github.com/casbin/Casbin.NET)
-- [SqlSugar](https://github.com/sunkaixuan/SqlSugar)
-
-## License
-
-This project is under Apache 2.0 License. See the [LICENSE](LICENSE) file for the full license text.
