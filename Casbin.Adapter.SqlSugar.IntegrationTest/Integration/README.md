@@ -1,24 +1,24 @@
 # Integration Tests for Multi-Context Transaction Integrity
 
-This directory contains integration tests that verify the transaction integrity guarantees of the multi-context EFCore adapter feature.
+This directory contains integration tests that verify the transaction integrity guarantees of the multi-context SqlSugar adapter feature.
 
 ## Separate Test Project
 
-These integration tests are in a **separate test project** (`Casbin.Persist.Adapter.EFCore.IntegrationTest`) to enable sequential framework execution.
+These integration tests are in a **separate test project** (`Casbin.Adapter.SqlSugar.IntegrationTest`) to enable sequential framework execution.
 
 **Why separate?**
 - Integration tests run frameworks **sequentially** (one at a time) to avoid PostgreSQL database conflicts
 - Unit tests continue running frameworks **in parallel** for faster execution
-- .NET 9+ runs multi-targeted tests in parallel by default - this separation allows different configurations
+- .NET 9+ and .NET 10.0 runs multi-targeted tests in parallel by default - this separation allows different configurations
 
 **Project Settings:**
 - `<TestTfmsInParallel>false</TestTfmsInParallel>` - Frameworks execute sequentially
-- Shares single PostgreSQL database: `casbin_integration_test`
+- Shares single PostgreSQL database: `casbin_integration_sqlsugar`
 - Uses `DisableParallelization = true` on test collection for within-framework sequencing
 
 ## Purpose
 
-These tests prove that when multiple `DbContext` instances share the same `DbConnection` object, operations across contexts are **atomic** - they either all succeed or all fail together.
+These tests prove that when multiple `SqlSugarClient` instances share the same `DbConnection` object, operations across contexts are **atomic** - they either all succeed or all fail together.
 
 ## Prerequisites
 
@@ -40,7 +40,7 @@ Create the test database:
 psql -U postgres
 
 # Create the test database
-CREATE DATABASE casbin_integration_test;
+CREATE DATABASE casbin_integration_sqlsugar;
 
 # Exit psql
 \q
@@ -49,29 +49,37 @@ CREATE DATABASE casbin_integration_test;
 Alternatively, use a one-liner:
 
 ```bash
-psql -U postgres -c "CREATE DATABASE casbin_integration_test;"
+psql -U postgres -c "CREATE DATABASE casbin_integration_sqlsugar;"
 ```
 
 ### 3. Connection Credentials
 
 The tests use these default credentials:
 - **Host**: `localhost:5432`
-- **Database**: `casbin_integration_test`
+- **Database**: `casbin_integration_sqlsugar`
 - **Username**: `postgres`
 - **Password**: `postgres4all!`
 
 **If your PostgreSQL uses different credentials**, update the connection string in [TransactionIntegrityTestFixture.cs](TransactionIntegrityTestFixture.cs):
 
 ```csharp
-ConnectionString = "Host=localhost;Database=casbin_integration_test;Username=YOUR_USER;Password=YOUR_PASSWORD";
+ConnectionString = "Host=localhost;Database=casbin_integration_sqlsugar;Username=YOUR_USER;Password=YOUR_PASSWORD";
 ```
 
 ## Running the Tests
+
+Supports .NET 8.0, .NET 9.0 and .NET 10.0.
 
 ### Run All Integration Tests
 
 ```bash
 dotnet test --filter "Category=Integration"
+```
+
+### Run in Release Mode
+
+```bash
+dotnet test Casbin.Adapter.SqlSugar.IntegrationTest -c Release
 ```
 
 ### Run a Specific Test
@@ -80,10 +88,10 @@ dotnet test --filter "Category=Integration"
 dotnet test --filter "FullyQualifiedName~SavePolicy_WithSharedConnection_ShouldWriteToAllContextsAtomically"
 ```
 
-### Run with Specific Framework
+### Run with Specific Framework (supports net8.0 / net9.0 / net10.0)
 
 ```bash
-dotnet test --filter "Category=Integration" -f net9.0
+dotnet test --filter "Category=Integration" -f net10.0
 ```
 
 ## Test Architecture
@@ -134,7 +142,7 @@ This simulates real-world multi-context scenarios where different policy types a
 
 **Purpose:**
 
-These tests verify that `CasbinDbContext.HasDefaultSchema()` correctly routes policies to their designated schemas when using shared connections, ensuring schema isolation is maintained.
+These tests verify that the adapter correctly routes policies to their designated schemas when using shared connections, utilizing `ISqlSugarClientProvider.GetTableNameForPolicyType` and `SqlSugarClient.AS()` for dynamic table mapping.
 
 **Test Coverage:**
 
@@ -151,7 +159,7 @@ These tests verify that `CasbinDbContext.HasDefaultSchema()` correctly routes po
    - `g2` policies → `casbin_roles` schema
 
 2. **Shared Connection Impact:**
-   - Verifies `HasDefaultSchema()` returns correct schema name per context
+   - Verifies logic returns correct schema/table name per context
    - Confirms shared connection doesn't break schema isolation
    - Validates multi-context routing works correctly
 
@@ -168,10 +176,10 @@ When using a shared connection for atomic transactions, each context must still 
 
 ```bash
 # Run both SchemaDistributionTests
-dotnet test -f net6.0 --filter "FullyQualifiedName~SchemaDistributionTests" --verbosity normal
+dotnet test -f net10.0 --filter "FullyQualifiedName~SchemaDistributionTests" --verbosity normal
 
 # Run specific test
-dotnet test -f net6.0 --filter "FullyQualifiedName~SavePolicy_SharedConnection_ShouldDistributeAcrossSchemas" --verbosity normal
+dotnet test -f net10.0 --filter "FullyQualifiedName~SavePolicy_SharedConnection_ShouldDistributeAcrossSchemas" --verbosity normal
 ```
 
 ### AutoSaveTests
@@ -221,11 +229,11 @@ PostgreSQL is not running. Start it:
 - **macOS (Homebrew)**: `brew services start postgresql@17`
 - **Linux**: `sudo systemctl start postgresql`
 
-### Error: "database 'casbin_integration_test' does not exist"
+### Error: "database 'casbin_integration_sqlsugar' does not exist"
 
 Create the database:
 ```bash
-psql -U postgres -c "CREATE DATABASE casbin_integration_test;"
+psql -U postgres -c "CREATE DATABASE casbin_integration_sqlsugar;"
 ```
 
 ### Error: "password authentication failed for user 'postgres'"
@@ -238,7 +246,7 @@ Either:
 
 The test fixture should create tables automatically. If this fails:
 1. Ensure the database exists
-2. Ensure the user has CREATE privileges: `GRANT ALL PRIVILEGES ON DATABASE casbin_integration_test TO postgres;`
+2. Ensure the user has CREATE privileges: `GRANT ALL PRIVILEGES ON DATABASE casbin_integration_sqlsugar TO postgres;`
 3. Try manually creating schemas: `CREATE SCHEMA casbin_policies;` etc.
 
 ## Verification of Transaction Guarantees

@@ -12,7 +12,7 @@ namespace Casbin.Adapter.SqlSugar.UnitTest.Integration
     ///
     /// Prerequisites:
     /// - PostgreSQL running on localhost:5432
-    /// - Database "casbin_integration_test" must exist
+    /// - Database "casbin_integration_sqlsugar" must exist
     /// - Default credentials: postgres/postgres4all! (or update ConnectionString)
     /// </summary>
     public class TransactionIntegrityTestFixture : IAsyncLifetime
@@ -29,7 +29,7 @@ namespace Casbin.Adapter.SqlSugar.UnitTest.Integration
         {
             // Use local PostgreSQL for integration tests
             // Database must exist before running tests
-            ConnectionString = "Host=localhost;Database=casbin_integration_test;Username=postgres;Password=postgres4all!";
+            ConnectionString = "Host=localhost;Database=casbin_integration_sqlsugar;Username=postgres;Password=postgres4all!";
         }
 
         public async Task InitializeAsync()
@@ -46,7 +46,7 @@ namespace Casbin.Adapter.SqlSugar.UnitTest.Integration
             {
                 throw new InvalidOperationException(
                     $"Failed to initialize TransactionIntegrityTestFixture. " +
-                    $"Ensure PostgreSQL is running and database 'casbin_integration_test' exists. " +
+                    $"Ensure PostgreSQL is running and database 'casbin_integration_sqlsugar' exists. " +
                     $"Connection string: {ConnectionString}", ex);
             }
         }

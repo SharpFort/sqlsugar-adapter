@@ -10,196 +10,154 @@ Multi-context support allows you to store different Casbin policy types in separ
 - Separate concerns in multi-tenant systems
 
 **How it works:**
-- Each `CasbinDbContext` targets a different schema, table, or database
-- A context provider routes policy types to the appropriate context
+- Each `ISqlSugarClient` instance targets a different schema, table, or database
+- A client provider routes policy types to the appropriate client
 - The adapter automatically coordinates operations across all contexts
+- Supports .NET 8.0, 9.0, and 10.0
 
 ## Quick Start
 
 ### Step 1: Create Database Contexts
 
-Create separate `CasbinDbContext` instances that **share the same physical DbConnection object**.
+Create separate `SqlSugarClient` instances that **share the same physical DbConnection object**.
 
 **⚠️ CRITICAL - Shared Connection Requirement:**
 
-For atomic transactions across contexts, you MUST pass the **same DbConnection object instance** to all contexts. EF Core's `UseTransaction()` requires reference equality of connection objects, not just matching connection strings.
+For atomic transactions across contexts, you MUST assign the **same DbConnection object instance** to all clients.
 
 **✅ CORRECT: Share physical DbConnection object**
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Data.SqlClient;  // or Npgsql.NpgsqlConnection, etc.
-using Casbin.Persist.Adapter.EFCore;
+using SqlSugar;
+using Npgsql; // or Microsoft.Data.SqlClient, etc.
+using Casbin.Adapter.SqlSugar;
 
-// Create ONE shared connection object
-string connectionString = "Server=localhost;Database=CasbinDB;Trusted_Connection=True;";
-var sharedConnection = new SqlConnection(connectionString);
+// 1. Create ONE shared connection object
+string connectionString = "Host=localhost;Database=CasbinDB;Username=user;Password=pass";
+var sharedConnection = new NpgsqlConnection(connectionString);
+await sharedConnection.OpenAsync(); // Ensure connection is open
 
-// Pass SAME connection instance to both contexts
-var policyContext = new CasbinDbContext<int>(
-    new DbContextOptionsBuilder<CasbinDbContext<int>>()
-        .UseSqlServer(sharedConnection)  // ← Shared connection object
-        .Options,
-    schemaName: "policies");
-policyContext.Database.EnsureCreated();
+// 2. Create helper to configure clients (SqlSugar cannot directly take DbConnection in constructor config)
+ConnectionConfig CreateConfig(string schema) => new ConnectionConfig 
+{
+    ConnectionString = connectionString,
+    DbType = DbType.PostgreSQL,
+    IsAutoCloseConnection = false, // Shared connection must NOT auto-close
+    ConfigureExternalServices = new ConfigureExternalServices
+    {
+        EntityService = (c, p) => 
+        {
+            // Map to specific schema/table
+            if (p.EntityName == nameof(CasbinRule)) 
+                p.DbTableName = $"{schema}.casbin_rule"; 
+        }
+    }
+};
 
-var groupingContext = new CasbinDbContext<int>(
-    new DbContextOptionsBuilder<CasbinDbContext<int>>()
-        .UseSqlServer(sharedConnection)  // ← Same connection object
-        .Options,
-    schemaName: "groupings");
-groupingContext.Database.EnsureCreated();
+// 3. Create clients and inject shared connection
+var policyClient = new SqlSugarClient(CreateConfig("policies"));
+policyClient.Ado.Connection = sharedConnection; // <--- Inject shared connection
+
+var groupingClient = new SqlSugarClient(CreateConfig("groupings"));
+groupingClient.Ado.Connection = sharedConnection; // <--- Inject same connection object
+
+// 4. (Optional) Initialize tables if needed
+// policyClient.CodeFirst.InitTables<CasbinRule>();
 ```
 
 **❌ WRONG: This will NOT provide atomic transactions**
 
 ```csharp
-// Each .UseSqlServer(connectionString) creates a DIFFERENT DbConnection object
-var policyContext = new CasbinDbContext<int>(
-    new DbContextOptionsBuilder<CasbinDbContext<int>>()
-        .UseSqlServer(connectionString)  // ← Creates DbConnection #1
-        .Options);
+// Creating separate clients without sharing Ado.Connection
+var client1 = new SqlSugarClient(new ConnectionConfig { ConnectionString = connStr, ... });
+var client2 = new SqlSugarClient(new ConnectionConfig { ConnectionString = connStr, ... });
 
-var groupingContext = new CasbinDbContext<int>(
-    new DbContextOptionsBuilder<CasbinDbContext<int>>()
-        .UseSqlServer(connectionString)  // ← Creates DbConnection #2 (different object!)
-        .Options);
-
-// These contexts have different connection objects, so they CANNOT share transactions
+// These clients have different connection objects (internal or external), 
+// so they CANNOT share transactions automatically.
 ```
 
-**Other configuration options:**
+### Step 2: Implement Client Provider
 
-| Option | Use Case | Example |
-|--------|----------|---------|
-| **Different schemas** | SQL Server, PostgreSQL | `schemaName: "policies"` vs `schemaName: "groupings"` |
-| **Different tables** | Any database | `tableName: "casbin_policy"` vs `tableName: "casbin_grouping"` |
-| **Separate databases** | Testing only | `UseSqlite("policy.db")` vs `UseSqlite("grouping.db")` ⚠️ Not atomic |
-
-### Step 2: Implement Context Provider
-
-Create a provider that routes policy types to contexts:
+Create a provider that routes policy types to clients by implementing `ISqlSugarClientProvider`:
 
 ```csharp
 using System;
 using System.Collections.Generic;
-using Microsoft.EntityFrameworkCore;
-using Casbin.Persist.Adapter.EFCore;
+using Casbin.Adapter.SqlSugar;
+using SqlSugar;
 
-public class PolicyTypeContextProvider : ICasbinDbContextProvider<int>
+public class PolicyTypeClientProvider : ISqlSugarClientProvider
 {
-    private readonly CasbinDbContext<int> _policyContext;
-    private readonly CasbinDbContext<int> _groupingContext;
+    private readonly ISqlSugarClient _policyClient;
+    private readonly ISqlSugarClient _groupingClient;
+    private readonly System.Data.Common.DbConnection _sharedConnection;
 
-    public PolicyTypeContextProvider(
-        CasbinDbContext<int> policyContext,
-        CasbinDbContext<int> groupingContext)
+    public PolicyTypeClientProvider(
+        ISqlSugarClient policyClient,
+        ISqlSugarClient groupingClient,
+        System.Data.Common.DbConnection sharedConnection)
     {
-        _policyContext = policyContext ?? throw new ArgumentNullException(nameof(policyContext));
-        _groupingContext = groupingContext ?? throw new ArgumentNullException(nameof(groupingContext));
+        _policyClient = policyClient;
+        _groupingClient = groupingClient;
+        _sharedConnection = sharedConnection;
     }
 
-    public DbContext GetContextForPolicyType(string policyType)
+    public ISqlSugarClient GetClientForPolicyType(string policyType)
     {
-        if (string.IsNullOrEmpty(policyType))
-            return _policyContext;
-
-        // Route: p/p2/p3 → policyContext, g/g2/g3 → groupingContext
-        return policyType.StartsWith("p", StringComparison.OrdinalIgnoreCase)
-            ? _policyContext
-            : _groupingContext;
+        // Route: p/p2/p3 → policyClient, g/g2/g3 → groupingClient
+        if (string.IsNullOrEmpty(policyType)) return _policyClient;
+        return policyType.StartsWith("g", StringComparison.OrdinalIgnoreCase) 
+            ? _groupingClient 
+            : _policyClient;
     }
 
-    public IEnumerable<DbContext> GetAllContexts()
-    {
-        return new DbContext[] { _policyContext, _groupingContext };
-    }
+    public IEnumerable<ISqlSugarClient> GetAllClients() => new[] { _policyClient, _groupingClient };
+    
+    // Return shared connection to enable atomic transactions
+    public System.Data.Common.DbConnection? GetSharedConnection() => _sharedConnection;
+    
+    public bool SharesConnection => true;
+    
+    // Optional: Dynamic table mapping if needed
+    public string? GetTableNameForPolicyType(string policyType) => null; 
 }
 ```
 
 **Policy type routing:**
 
-| Policy Type | Context | Description |
+| Policy Type | Client | Description |
 |-------------|---------|-------------|
-| `p`, `p2`, `p3`, ... | policyContext | Permission rules |
-| `g`, `g2`, `g3`, ... | groupingContext | Role/group assignments |
+| `p`, `p2`, `p3`, ... | policyClient | Permission rules |
+| `g`, `g2`, `g3`, ... | groupingClient | Role/group assignments |
 
 ### Step 3-4: Create Adapter and Enforcer
 
 ```csharp
 // Create provider
-var provider = new PolicyTypeContextProvider(policyContext, groupingContext);
+var provider = new PolicyTypeClientProvider(policyClient, groupingClient, sharedConnection);
 
-// Create adapter with multi-context support
-var adapter = new EFCoreAdapter<int>(provider);
+// Create adapter using the provider
+var adapter = new SqlSugarAdapter(provider);
 
-// Create enforcer (multi-context behavior is transparent)
+// Create enforcer
 var enforcer = new Enforcer("path/to/model.conf", adapter);
-enforcer.LoadPolicy();
+await enforcer.LoadPolicyAsync();
 ```
 
 ### Step 5: Use Normally
 
 ```csharp
-// Add policies (automatically routed to correct contexts)
-enforcer.AddPolicy("alice", "data1", "read");        // → policyContext
-enforcer.AddGroupingPolicy("alice", "admin");        // → groupingContext
+// Add policies (automatically routed to correct clients)
+await enforcer.AddPolicyAsync("alice", "data1", "read");        // → policyClient
+await enforcer.AddGroupingPolicyAsync("alice", "admin");        // → groupingClient
 
-// Save (coordinated across both contexts)
-enforcer.SavePolicy();
+// Save (coordinated across both clients atomically)
+// Note: Disable AutoSave first for atomicity
+enforcer.EnableAutoSave(false); 
+await enforcer.SavePolicyAsync();
 
-// Check permissions (combines data from both contexts)
-bool allowed = enforcer.Enforce("alice", "data1", "read");
-```
-
-### Complete Example
-
-```csharp
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Data.SqlClient;
-using NetCasbin;
-using Casbin.Persist.Adapter.EFCore;
-
-public class Program
-{
-    public static void Main()
-    {
-        // 1. Create shared connection object
-        string connectionString = "Server=localhost;Database=CasbinDB;Trusted_Connection=True;";
-        var sharedConnection = new SqlConnection(connectionString);
-
-        // 2. Create contexts with shared connection
-        var policyContext = new CasbinDbContext<int>(
-            new DbContextOptionsBuilder<CasbinDbContext<int>>()
-                .UseSqlServer(sharedConnection).Options,  // ← Shared connection
-            schemaName: "policies");
-        policyContext.Database.EnsureCreated();
-
-        var groupingContext = new CasbinDbContext<int>(
-            new DbContextOptionsBuilder<CasbinDbContext<int>>()
-                .UseSqlServer(sharedConnection).Options,  // ← Same connection
-            schemaName: "groupings");
-        groupingContext.Database.EnsureCreated();
-
-        // 3. Create provider (use implementation from Step 2)
-        var provider = new PolicyTypeContextProvider(policyContext, groupingContext);
-
-        // 4. Create adapter and enforcer
-        var adapter = new EFCoreAdapter<int>(provider);
-        var enforcer = new Enforcer("rbac_model.conf", adapter);
-
-        // 5. Use enforcer (atomic transactions across both contexts)
-        enforcer.AddPolicy("alice", "data1", "read");
-        enforcer.AddGroupingPolicy("alice", "admin");
-        enforcer.SavePolicy();
-
-        bool allowed = enforcer.Enforce("alice", "data1", "read");
-        Console.WriteLine($"Alice can read data1: {allowed}");
-
-        // 6. Cleanup
-        sharedConnection.Dispose();
-    }
-}
+// Check permissions
+bool allowed = await enforcer.EnforceAsync("alice", "data1", "read");
 ```
 
 ## Configuration Reference
@@ -215,411 +173,95 @@ await enforcer.SavePolicyAsync();
 await enforcer.LoadPolicyAsync();
 ```
 
-### Filtered Loading
-
-Load subsets of policies across all contexts by implementing `IPolicyFilter`:
-
-```csharp
-using Casbin.Model;
-using Casbin.Persist;
-
-// Create a custom filter for specific field values
-public class SimpleFieldFilter : IPolicyFilter
-{
-    private readonly PolicyFilter _policyFilter;
-
-    public SimpleFieldFilter(string policyType, int fieldIndex, IPolicyValues values)
-    {
-        _policyFilter = new PolicyFilter(policyType, fieldIndex, values);
-    }
-
-    public IQueryable<T> Apply<T>(IQueryable<T> policies) where T : IPersistPolicy
-    {
-        return _policyFilter.Apply(policies);
-    }
-}
-
-// Use the filter to load only Alice's p policies
-enforcer.LoadFilteredPolicy(
-    new SimpleFieldFilter("p", 0, Policy.ValuesFrom(new[] { "alice", "", "" }))
-);
-```
-
-For more complex filtering scenarios (e.g., domain-based filtering), implement `IPolicyFilter` directly:
-
-```csharp
-public class DomainFilter : IPolicyFilter
-{
-    private readonly string _domain;
-
-    public DomainFilter(string domain) => _domain = domain;
-
-    public IQueryable<T> Apply<T>(IQueryable<T> policies) where T : IPersistPolicy
-    {
-        return policies.Where(p =>
-            (p.Type == "p" && p.Value2 == _domain) ||  // Filter p policies by domain
-            (p.Type == "g" && p.Value3 == _domain)      // Filter g policies by domain
-        );
-    }
-}
-
-// Load policies for a specific domain
-enforcer.LoadFilteredPolicy(new DomainFilter("tenant-123"));
-```
-
 ### Dependency Injection
 
-For ASP.NET Core applications with shared connection:
+For ASP.NET Core applications:
 
 ```csharp
-// Register shared connection as singleton
-services.AddSingleton<DbConnection>(sp =>
+// 1. Register shared connection
+services.AddScoped<System.Data.Common.DbConnection>(sp =>
 {
-    var connectionString = Configuration.GetConnectionString("Casbin");
-    return new SqlConnection(connectionString);
+    var conn = new NpgsqlConnection(Configuration.GetConnectionString("Casbin"));
+    conn.Open();
+    return conn;
 });
 
-// Register context provider with shared connection
-services.AddSingleton<ICasbinDbContextProvider<int>>(sp =>
+// 2. Register Client Provider
+services.AddScoped<ISqlSugarClientProvider>(sp =>
 {
-    var sharedConnection = sp.GetRequiredService<DbConnection>();
-
-    var policyCtx = new CasbinDbContext<int>(
-        new DbContextOptionsBuilder<CasbinDbContext<int>>()
-            .UseSqlServer(sharedConnection).Options,  // Shared connection
-        schemaName: "policies");
-
-    var groupingCtx = new CasbinDbContext<int>(
-        new DbContextOptionsBuilder<CasbinDbContext<int>>()
-            .UseSqlServer(sharedConnection).Options,  // Same connection
-        schemaName: "groupings");
-
-    return new PolicyTypeContextProvider(policyCtx, groupingCtx);
+    var sharedConn = sp.GetRequiredService<System.Data.Common.DbConnection>();
+    
+    // Helpers to create clients attached to sharedConn...
+    var clientP = new SqlSugarClient(ConfigFor("policies"));
+    clientP.Ado.Connection = sharedConn;
+    
+    var clientG = new SqlSugarClient(ConfigFor("groupings"));
+    clientG.Ado.Connection = sharedConn;
+    
+    return new PolicyTypeClientProvider(clientP, clientG, sharedConn);
 });
 
-services.AddSingleton<IAdapter>(sp =>
-{
-    var provider = sp.GetRequiredService<ICasbinDbContextProvider<int>>();
-    return new EFCoreAdapter<int>(provider);
-});
+// 3. Register Adapter
+services.AddScoped<IAdapter, SqlSugarAdapter>();
 
-services.AddSingleton<IEnforcer>(sp =>
+// 4. Register Enforcer
+services.AddScoped<IEnforcer>(sp =>
 {
     var adapter = sp.GetRequiredService<IAdapter>();
-    return new Enforcer("rbac_model.conf", adapter);
+    return new Enforcer("model.conf", adapter);
 });
 ```
 
 ### Connection Lifetime Management
 
-**Important:** When using shared connections, you are responsible for connection lifetime:
-
-**In simple applications:**
-```csharp
-// Create connection
-var connection = new SqlConnection(connectionString);
-
-// Use for contexts/adapter/enforcer
-// ... (create contexts, adapter, enforcer)
-
-// Dispose when done
-connection.Dispose();
-```
-
-**With using statement:**
-```csharp
-using (var connection = new SqlConnection(connectionString))
-{
-    // Create contexts with shared connection
-    var policyCtx = new CasbinDbContext<int>(...);
-    var groupingCtx = new CasbinDbContext<int>(...);
-
-    // Create and use enforcer
-    var provider = new PolicyTypeContextProvider(policyCtx, groupingCtx);
-    var adapter = new EFCoreAdapter<int>(provider);
-    var enforcer = new Enforcer("model.conf", adapter);
-
-    enforcer.LoadPolicy();
-    // ... use enforcer
-
-} // Connection disposed automatically
-```
-
-**In DI scenarios:**
-
-The DbConnection is registered as a singleton and will be disposed when the application shuts down. No manual disposal needed in request handlers.
+**Important:** When using shared connections, **you** (or your DI container) are responsible for connection lifetime (disposing the connection). `SqlSugarClient` will not close an injected external connection if `IsAutoCloseConnection` is set to false (which is recommended for shared scenarios).
 
 ## Transaction Behavior
 
 ### Shared Connection Requirements
 
-**For atomic transactions across contexts, all contexts MUST share the same DbConnection object instance.**
+**For atomic transactions, all clients MUST share the same DbConnection object.**
 
 **How atomic transactions work:**
-1. You create ONE DbConnection object and pass it to all contexts
-2. Adapter detects shared connection via `CanShareTransaction()` (reference equality check)
-3. Adapter uses `UseTransaction()` to enlist all contexts in one transaction
-4. Database ensures atomic commit/rollback across both contexts
-
-**✅ CORRECT Example:**
-
-Already shown in Step 1 - create shared DbConnection and pass to all contexts.
+1. You create ONE DbConnection object.
+2. You pass it to all SqlSugarClient instances via `client.Ado.Connection`.
+3. Provider returns `true` for `SharesConnection`.
+4. Adapter starts a transaction on the shared connection.
+5. Adapter assigns the transaction to `client.Ado.Transaction` for all clients.
+6. Database ensures atomic commit/rollback.
 
 ### EnableAutoSave and Transaction Atomicity
 
-The Casbin Enforcer's `EnableAutoSave` setting fundamentally affects transaction atomicity in multi-context scenarios.
+The `EnableAutoSave` setting affects atomicity.
 
-#### Understanding AutoSave Modes
+**AutoSave ON (Default)**
+- Commits immediately per operation.
+- **No atomicity across multiple operations.**
 
-**EnableAutoSave(true) - Immediate Commits (Default)**
+**AutoSave OFF (Recommended for Multi-Context)**
+- Operations batch in memory.
+- `SavePolicyAsync()` commits all changes in **one atomic transaction**.
 
-When AutoSave is enabled (the default), each `AddPolicy`/`RemovePolicy`/`UpdatePolicy` operation commits immediately to the database.
-
-**Behavior:**
-- Each individual operation is fully atomic (succeeds or fails completely)
-- Each operation creates its own implicit database transaction
-- **No atomicity across multiple operations:**
-  - If you execute 3 operations sequentially and the 3rd fails, the first 2 remain committed
-  - Earlier operations cannot be rolled back when later operations fail
-  - Each operation is independent
-
-**Use Cases:**
-- Real-time policy updates where each change is independent
-- Single-context usage where cross-context atomicity isn't required
-- Scenarios where you can tolerate some operations committing while others don't
-
-**Example - Independent Commits:**
-```csharp
-var enforcer = new Enforcer(model, adapter);
-enforcer.EnableAutoSave(true);  // Default behavior
-
-// Each operation commits immediately and independently:
-await enforcer.AddPolicyAsync("alice", "data1", "read");         // ← Commits to DB now
-await enforcer.AddGroupingPolicyAsync("alice", "admin");         // ← Commits to DB now
-await enforcer.AddNamedGroupingPolicyAsync("g2", "admin", "super"); // ← If this fails...
-
-// ⚠️ The first 2 operations are already committed and CANNOT be rolled back
-```
-
-**EnableAutoSave(false) - Batched Atomic Commits**
-
-When AutoSave is disabled, all operations stay in memory until `enforcer.SavePolicyAsync()` is called.
-
-**Behavior:**
-- Operations stored in Casbin's in-memory policy store (not database)
-- When `SavePolicyAsync()` is called with shared connection:
-  - All contexts enlisted in single connection-level transaction
-  - All operations commit atomically (all-or-nothing)
-  - If any operation fails, entire transaction rolls back
-- **Full atomicity across all operations**
-
-**Use Cases:**
-- Multi-context scenarios requiring atomicity
-- Batch policy updates that must succeed or fail together
-- Critical operations where partial application is unacceptable
-- Production systems with ACID requirements
-
-**Example - Atomic Batch Commit:**
-```csharp
-var enforcer = new Enforcer(model, adapter);
-enforcer.EnableAutoSave(false);  // Disable AutoSave for atomicity
-
-// All operations stay in memory (not committed yet):
-await enforcer.AddPolicyAsync("alice", "data1", "read");         // In memory only
-await enforcer.AddGroupingPolicyAsync("alice", "admin");         // In memory only
-await enforcer.AddNamedGroupingPolicyAsync("g2", "admin", "super"); // In memory only
-
-// Commit all operations atomically (all-or-nothing):
-await enforcer.SavePolicyAsync();  // ← All 3 commit together OR all 3 roll back
-
-// ✅ Either all 3 policies exist in database, or none do
-```
-
-#### Recommendation for Multi-Context Atomicity
-
-> **💡 Best Practice**
->
-> When using multiple contexts and you need all policy changes to succeed or fail together:
->
-> 1. **Disable AutoSave:** `enforcer.EnableAutoSave(false)`
-> 2. **Use shared connection:** Ensure all contexts share the same `DbConnection` object (see above)
-> 3. **Batch commit:** Call `await enforcer.SavePolicyAsync()` to commit atomically
->
-> This ensures all policy changes across all contexts are committed atomically or rolled back together.
-
-#### Real-World Example: Authorization Setup
-
-**Scenario:** Setting up a new user with permissions and role assignments.
-
-**Without Atomicity (AutoSave ON - Default):**
-```csharp
-// AutoSave is ON by default
-await enforcer.AddPolicyAsync("bob", "data1", "read");      // ✓ Committed to policies schema
-await enforcer.AddPolicyAsync("bob", "data1", "write");     // ✓ Committed to policies schema
-await enforcer.AddGroupingPolicyAsync("bob", "admin");      // ✗ FAILS - network error
-
-// Problem: Bob has partial permissions (read/write) but no admin role
-// Result: Inconsistent authorization state
-```
-
-**With Atomicity (AutoSave OFF):**
-```csharp
-enforcer.EnableAutoSave(false);  // Require explicit save
-
-await enforcer.AddPolicyAsync("bob", "data1", "read");      // In memory
-await enforcer.AddPolicyAsync("bob", "data1", "write");     // In memory
-await enforcer.AddGroupingPolicyAsync("bob", "admin");      // In memory
-
-try
-{
-    await enforcer.SavePolicyAsync();  // Atomic commit - all or nothing
-    // ✓ Success: All 3 policies committed
-}
-catch (Exception ex)
-{
-    // ✓ Failure: All 3 policies rolled back automatically
-    // Result: Bob has no permissions (consistent state)
-    Console.WriteLine($"Setup failed: {ex.Message}");
-}
-```
-
-#### Technical Details
-
-**How AutoSave Affects Transaction Coordination:**
-
-With **AutoSave ON**, the Casbin Enforcer immediately calls the adapter's methods for each operation. The adapter has no opportunity to coordinate transactions because it receives operations one at a time.
-
-**Call Flow (AutoSave ON):**
-```
-User: enforcer.AddPolicyAsync()
-  → Enforcer: Immediately calls adapter.AddPolicyAsync()
-    → Adapter: context.SaveChangesAsync() → Database (committed)
-  → Returns to user
-```
-
-With **AutoSave OFF**, operations accumulate in memory. Only when `SavePolicyAsync()` is called does the adapter receive all policies at once, enabling atomic transaction coordination.
-
-**Call Flow (AutoSave OFF):**
-```
-User: enforcer.AddPolicyAsync()
-  → Enforcer: Stores in memory, does NOT call adapter
-  → Returns to user
-
-User: enforcer.SavePolicyAsync()
-  → Enforcer: Calls adapter.SavePolicyAsync() with ALL policies
-    → Adapter: Starts shared transaction
-    → Adapter: Enlists all contexts in transaction
-    → Adapter: Commits/clears all contexts
-    → Adapter: Commits transaction atomically
-  → Returns to user
-```
-
-**For More Details:** See [Integration Test README](Casbin.Persist.Adapter.EFCore.UnitTest/Integration/README.md) for test evidence of this behavior, particularly the rollback tests that require `EnableAutoSave(false)`.
-
-### Context Factory Pattern (Recommended)
-
-```csharp
-public class CasbinContextFactory : IDisposable
-{
-    private readonly DbConnection _sharedConnection;
-
-    public CasbinContextFactory(IConfiguration configuration)
-    {
-        var connectionString = configuration.GetConnectionString("Casbin");
-        _sharedConnection = new SqlConnection(connectionString);  // Create shared connection once
-    }
-
-    public CasbinDbContext<int> CreateContext(string schemaName)
-    {
-        var options = new DbContextOptionsBuilder<CasbinDbContext<int>>()
-            .UseSqlServer(_sharedConnection)  // ← Share same connection object
-            .Options;
-        return new CasbinDbContext<int>(options, schemaName: schemaName);
-    }
-
-    public void Dispose()
-    {
-        _sharedConnection?.Dispose();
-    }
-}
-
-// Usage
-using var factory = new CasbinContextFactory(configuration);
-var policyContext = factory.CreateContext("policies");
-var groupingContext = factory.CreateContext("groupings");
-// Both contexts share the same physical connection object
-```
-
-### Database Compatibility
-
-| Database | Atomic Transactions | Connection Requirement | Notes |
-|----------|-------------------|----------------------|-------|
-| **SQL Server** | ✅ Yes | Same DbConnection object | Works with different schemas/tables |
-| **PostgreSQL** | ✅ Yes | Same DbConnection object | Works with different schemas/tables |
-| **MySQL** | ✅ Yes | Same DbConnection object | Works with different schemas/tables |
-| **SQLite** | ✅ Yes | Same DbConnection object | Works with different tables in same file |
-
-**Note:** "Same database" requires **same DbConnection object instance**, not just matching connection strings.
-
-### Responsibility Matrix
-
-| Task | Your Responsibility | Adapter Responsibility |
-|------|-------------------|----------------------|
-| Create shared DbConnection object | ✅ YES | ❌ NO |
-| Pass same connection to all contexts | ✅ YES | ❌ NO |
-| Manage connection lifetime | ✅ YES | ❌ NO |
-| Use context factory pattern | ✅ YES (recommended) | ❌ NO |
-| Call `UseTransaction()` | ❌ NO | ✅ YES (internal) |
-| Detect shared connection (reference equality) | ❌ NO | ✅ YES |
-| Coordinate commit/rollback | ❌ NO | ✅ YES |
-
-### When Separate Connections Are Acceptable
-
-**Non-atomic behavior (individual transactions per context) may be acceptable for:**
-- Testing and development
-- Read-heavy workloads with eventual consistency
-- Non-critical data
-
-**Not acceptable for:**
-- Production ACID requirements (financial, authorization)
-- Compliance/audit scenarios
-- Multi-tenant SaaS with strict data integrity
+**Best Practice:**
+1. `enforcer.EnableAutoSave(false);`
+2. Perform all additions/removals.
+3. `await enforcer.SavePolicyAsync();`
 
 ## Troubleshooting
 
 ### "No such table" errors
 
-**Cause:** Database tables not created.
+Ensure tables are initialized. SqlSugar CodeFirst is powerful but explicit initialization might be needed for specific schemas:
 
-**Solution:**
 ```csharp
-policyContext.Database.EnsureCreated();
-groupingContext.Database.EnsureCreated();
+client.CodeFirst.InitTables<CasbinRule>();
 ```
 
-### Partial data committed on failure
+### Transaction Warnings
 
-**Cause:** Using separate database connections (e.g., different SQLite files).
-
-**Solution:** Use same database with different schemas/tables:
-```csharp
-// Instead of separate files
-.UseSqlite("Data Source=policy.db")
-.UseSqlite("Data Source=grouping.db")
-
-// Use same file with different tables
-.UseSqlite("Data Source=casbin.db")  // Both use same file
-// Configure different table names
-```
-
-### Transaction warnings in logs
-
-**Cause:** Adapter detected different connection strings and fell back to individual transactions.
-
-**Solution:** Ensure all contexts use the same connection string variable (see [Context Factory Pattern](#context-factory-pattern-recommended)).
+If the adapter detects separate connections (Provider returns `SharesConnection = false` or `GetSharedConnection() = null`), it will fall back to individual transactions. This means if one context fails, others might already be committed.
 
 ## See Also
 
-- [MULTI_CONTEXT_DESIGN.md](MULTI_CONTEXT_DESIGN.md) - Technical architecture and implementation details
-- [Casbin.NET Documentation](https://casbin.org/docs/overview) - Casbin concepts and model syntax
-- [ICasbinDbContextProvider Interface](Casbin.Persist.Adapter.EFCore/ICasbinDbContextProvider.cs) - Interface definition
+- [MULTI_CONTEXT_DESIGN.md](MULTI_CONTEXT_DESIGN.md) - Technical architecture
+- [Integration Tests](Casbin.Adapter.SqlSugar.IntegrationTest/Integration/README.md) - Running transaction tests

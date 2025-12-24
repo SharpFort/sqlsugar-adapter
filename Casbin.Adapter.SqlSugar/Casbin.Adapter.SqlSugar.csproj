@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageId>Casbin.NET.SqlSugar</PackageId>
+    <PackageId>Casbin.NET.Adapter.SqlSugar</PackageId>
     <PackageIcon>casbin.png</PackageIcon>
     <Authors>Casbin.NET</Authors>
     <RepositoryType>GIT</RepositoryType>
