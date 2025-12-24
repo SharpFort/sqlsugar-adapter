@@ -1,47 +1,45 @@
-# SqlSugar Adapter
+# EF Core Adapter
 
-[![Build Status](https://github.com/SharpFort/sqlsugar-adapter/workflows/Build/badge.svg)](https://github.com/SharpFort/sqlsugar-adapter/actions)
-[![Release](https://img.shields.io/github/release/SharpFort/sqlsugar-adapter.svg)](https://github.com/SharpFort/sqlsugar-adapter/releases/latest)
+[![Build Status](https://github.com/casbin-net/efcore-adapter/workflows/Build/badge.svg)](https://github.com/casbin-net/efcore-adapter/actions)
+[![Coverage Status](https://coveralls.io/repos/github/casbin-net/EFCore-Adapter/badge.svg?branch=master)](https://coveralls.io/github/casbin-net/EFCore-Adapter?branch=master)
+[![Nuget](https://img.shields.io/nuget/v/Casbin.NET.Adapter.EFCore.svg)](https://www.nuget.org/packages/Casbin.NET.Adapter.EFCore/)
+[![Release](https://img.shields.io/github/release/casbin-net/efcore-adapter.svg)](https://github.com/casbin-net/efcore-adapter/releases/latest)
+[![Nuget](https://img.shields.io/nuget/dt/Casbin.NET.Adapter.EFCore.svg)](https://www.nuget.org/packages/Casbin.NET.Adapter.EFCore/)
+[![Discord](https://img.shields.io/discord/1022748306096537660?logo=discord&label=discord&color=5865F2)](https://discord.gg/S5UjpzGZjN)
 
-SqlSugar Adapter 是 [Casbin](https://github.com/casbin/casbin) 的 [SqlSugar](https://github.com/DotNetNext/SqlSugar) ORM 适配器。使用此库，Casbin 可以从 SqlSugar 支持的数据库加载策略，或将策略保存到数据库中。
+EF Core Adapter is the [EF Core](https://docs.microsoft.com/en-gb/ef/) adapter for [Casbin](https://github.com/casbin/casbin). With this library, Casbin can load policy from EF Core supported database or save policy to it.
 
-> **说明**: 此项目是基于 [casbin-net/efcore-adapter](https://github.com/casbin-net/efcore-adapter) 转换而来，将底层 ORM 从 Entity Framework Core 替换为 SqlSugar。
+The current version supported all databases which EF Core supported, there is a part list:
 
-当前版本支持 SqlSugar 所支持的所有数据库，包括：
-
-- SQL Server 2012 及以上版本
-- SQLite 3.7 及以上版本
+- SQL Server 2012 onwards
+- SQLite 3.7 onwards
+- Azure Cosmos DB SQL API
 - PostgreSQL
 - MySQL, MariaDB
 - Oracle DB
-- 达梦数据库
-- 人大金仓数据库
-- 更多...
+- Db2, Informix
+- And more...
 
-您可以在 [SqlSugar 数据库支持](https://www.donet5.com/Home/Doc?typeId=1182) 查看完整列表。
+You can see all the list at [Database Providers](https://docs.microsoft.com/en-gb/ef/core/providers).
 
-## 安装
-
-> **注意**: NuGet 包尚未发布。发布后，您可以使用以下命令安装：
-
-```bash
-dotnet add package SharpFort.Adapter.SqlSugar
+## Installation
+```
+dotnet add package Casbin.NET.Adapter.EFCore
 ```
 
-## 支持的框架
+## Supported Frameworks
 
-此适配器支持以下 .NET 目标框架：
+The adapter supports the following .NET target frameworks:
 - .NET 10.0
 - .NET 9.0
 - .NET 8.0
-- .NET 7.0
-- .NET 6.0
 
-## 简单示例
+
+## Simple Example
 
 ```csharp
-using Casbin.Adapter.SqlSugar;
-using SqlSugar;
+using Casbin.Adapter.EFCore;
+using Microsoft.EntityFrameworkCore;
 using NetCasbin;
 
 namespace ConsoleAppExample
@@ -50,158 +48,143 @@ namespace ConsoleAppExample
     {
         public static void Main(string[] args)
         {
-            // 创建 SqlSugar 客户端配置
-            var db = new SqlSugarClient(new ConnectionConfig()
-            {
-                DbType = DbType.Sqlite,
-                ConnectionString = "Data Source=casbin_example.db",
-                IsAutoCloseConnection = true
-            });
+            // You should build a DbContextOptions for CasbinDbContext<TKey>.
+            // The example use the SQLite database named "casbin_example.sqlite3".
+            var options = new DbContextOptionsBuilder<CasbinDbContext<int>>()
+                .UseSqlite("Data Source=casbin_example.sqlite3")
+                .Options;
+            var context = new CasbinDbContext<int>(options);
 
-            // 如果表不存在，可以使用 CodeFirst 自动创建
-            db.CodeFirst.InitTables<CasbinRule>();
+            // If it doesn't exist, you can use this to create it automatically.
+            context.Database.EnsureCreated();
 
-            // 初始化 SqlSugar 适配器并在 Casbin enforcer 中使用：
-            var sqlSugarAdapter = new SqlSugarAdapter(db);
-            var e = new Enforcer("examples/rbac_model.conf", sqlSugarAdapter);
+            // Initialize a EF Core adapter and use it in a Casbin enforcer:
+            var efCoreAdapter = new EFCoreAdapter<int>(context);
+            var e = new Enforcer("examples/rbac_model.conf", efCoreAdapter);
 
-            // 从数据库加载策略
+            // Load the policy from DB.
             e.LoadPolicy();
 
-            // 检查权限
+            // Check the permission.
             e.Enforce("alice", "data1", "read");
             
-            // 修改策略
+            // Modify the policy.
             // e.AddPolicy(...)
             // e.RemovePolicy(...)
-
-            // 将策略保存回数据库
+	
+            // Save the policy back to DB.
             e.SavePolicy();
         }
     }
 }
 ```
 
-## 使用依赖注入
+## Using with Dependency Injection
 
-当在依赖注入场景（如 ASP.NET Core）中使用适配器时，您应该使用 `IServiceProvider` 构造函数或扩展方法，以避免 ISqlSugarClient 实例被释放的问题。
+When using the adapter with dependency injection (e.g., in ASP.NET Core), you should use the `IServiceProvider` constructor or the extension method to avoid issues with disposed DbContext instances.
 
-### 推荐方式（使用扩展方法）
+### Recommended Approach (Using Extension Method)
 
 ```csharp
-using Casbin.Adapter.SqlSugar;
-using Casbin.Adapter.SqlSugar.Extensions;
-using SqlSugar;
+using Casbin.Persist.Adapter.EFCore;
+using Casbin.Persist.Adapter.EFCore.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
-// 注册服务
-services.AddSingleton<ISqlSugarClient>(sp =>
-{
-    return new SqlSugarClient(new ConnectionConfig()
-    {
-        DbType = DbType.SqlServer,
-        ConnectionString = connectionString,
-        IsAutoCloseConnection = true
-    });
-});
+// Register services
+services.AddDbContext<CasbinDbContext<int>>(options =>
+    options.UseSqlServer(connectionString));
 
-// 使用扩展方法注册适配器
-services.AddSqlSugarAdapter();
+// Register the adapter using the extension method
+services.AddEFCoreAdapter<int>();
 
-// 适配器会在每次操作时从服务提供程序解析客户端，
-// 防止在与长生命周期服务一起使用时出现上下文释放问题。
+// The adapter will resolve the DbContext from the service provider on each operation,
+// preventing issues with disposed contexts when used with long-lived services.
 ```
 
-### 替代方式（使用 IServiceProvider 构造函数）
+### Alternative Approach (Using IServiceProvider Constructor)
 
 ```csharp
-// 在启动配置中
-services.AddSingleton<ISqlSugarClient>(sp =>
-{
-    return new SqlSugarClient(new ConnectionConfig()
-    {
-        DbType = DbType.SqlServer,
-        ConnectionString = connectionString,
-        IsAutoCloseConnection = true
-    });
-});
+// In your startup configuration
+services.AddDbContext<CasbinDbContext<int>>(options =>
+    options.UseSqlServer(connectionString));
 
 services.AddCasbinAuthorization(options =>
 {
     options.DefaultModelPath = "model.conf";
     
-    // 使用 IServiceProvider 构造函数
+    // Use the IServiceProvider constructor
     options.DefaultEnforcerFactory = (sp, model) =>
-        new Enforcer(model, new SqlSugarAdapter(sp));
+        new Enforcer(model, new EFCoreAdapter<int>(sp));
 });
 ```
 
-这种方式在每次数据库操作时从服务提供程序解析 ISqlSugarClient，确保：
-- 适配器与 Scoped 的 ISqlSugarClient 实例正常工作
-- 当适配器生命周期超出创建它的作用域时不会抛出 `ObjectDisposedException`
-- 适配器可以在单例等长生命周期服务中使用
+This approach resolves the DbContext from the service provider on each database operation, ensuring that:
+- The adapter works correctly with scoped DbContext instances
+- No `ObjectDisposedException` is thrown when the adapter outlives the scope that created it
+- The adapter can be used in long-lived services like singletons
 
-## 多客户端支持
+## Multi-Context Support
 
-适配器支持将不同的策略类型存储在不同的数据库客户端中，允许您：
-- 将策略规则（p, p2 等）和分组规则（g, g2 等）存储在不同的 Schema 和/或表中
-- 每个客户端可以独立控制 Schema 和表
-- 为多租户或合规场景分离数据
+The adapter supports storing different policy types in separate database contexts, allowing you to:
+- Store policies (p, p2, etc.) and groupings (g, g2, etc.) in different schemas and/or tables
+- Each Context can control both schema AND table independently
+- Separate data for multi-tenant or compliance scenarios
 
-### 快速示例
+### Quick Example
 
 ```csharp
-// 创建共享连接配置
-var sharedConfig = new ConnectionConfig()
-{
-    DbType = DbType.SqlServer,
-    ConnectionString = connectionString,
-    IsAutoCloseConnection = false  // 共享连接时不自动关闭
-};
+// Create ONE shared connection object
+var sharedConnection = new SqlConnection(connectionString);
 
-// 创建使用共享连接的客户端
-var policyClient = new SqlSugarClient(sharedConfig);
-var groupingClient = new SqlSugarClient(sharedConfig);
+// Create contexts with shared connection
+var policyContext = new CasbinDbContext<int>(
+    new DbContextOptionsBuilder<CasbinDbContext<int>>()
+        .UseSqlServer(sharedConnection).Options,  // Shared connection
+    schemaName: "policies");
 
-// 创建将策略类型路由到客户端的提供程序
-var provider = new PolicyTypeClientProvider(policyClient, groupingClient);
+var groupingContext = new CasbinDbContext<int>(
+    new DbContextOptionsBuilder<CasbinDbContext<int>>()
+        .UseSqlServer(sharedConnection).Options,  // Same connection
+    schemaName: "groupings");
 
-// 使用提供程序创建适配器
-var adapter = new SqlSugarAdapter(provider);
+// Create a provider that routes policy types to contexts
+var provider = new PolicyTypeContextProvider(policyContext, groupingContext);
+
+// Use the provider with the adapter
+var adapter = new EFCoreAdapter<int>(provider);
 var enforcer = new Enforcer("rbac_model.conf", adapter);
 
-// 所有操作透明地跨客户端工作
-enforcer.AddPolicy("alice", "data1", "read");      // → policyClient
-enforcer.AddGroupingPolicy("alice", "admin");      // → groupingClient
-enforcer.SavePolicy();                              // 跨两者原子操作
+// All operations work transparently across contexts
+enforcer.AddPolicy("alice", "data1", "read");      // → policyContext
+enforcer.AddGroupingPolicy("alice", "admin");      // → groupingContext
+enforcer.SavePolicy();                              // Atomic across both
 ```
 
-> **⚠️ 事务完整性要求**
+> **⚠️ Transaction Integrity Requirements**
 >
-> 要实现多客户端原子操作：
-> 1. **共享连接:** 所有客户端必须使用**相同的连接对象**（引用相等）
-> 2. **禁用 AutoSave:** 使用 `enforcer.EnableAutoSave(false)` 并调用 `SavePolicyAsync()` 批量提交
-> 3. **支持的数据库:** PostgreSQL、MySQL、SQL Server、SQLite（同一文件）
+> For atomic multi-context operations:
+> 1. **Share DbConnection:** All contexts must use the **same `DbConnection` object** (reference equality)
+> 2. **Disable AutoSave:** Use `enforcer.EnableAutoSave(false)` and call `SavePolicyAsync()` to batch commit
+> 3. **Supported databases:** PostgreSQL, MySQL, SQL Server, SQLite (same file)
 >
-> **为什么要禁用 AutoSave？** 当 `EnableAutoSave(true)`（默认）时，每个策略操作立即独立提交。如果后续操作失败，之前的操作仍保持已提交状态。使用 `EnableAutoSave(false)` 时，所有更改保留在内存中，直到 `SavePolicyAsync()` 使用共享连接级事务原子地提交它们。
+> **Why disable AutoSave?** With `EnableAutoSave(true)` (default), each policy operation commits immediately and independently. If a later operation fails, earlier operations remain committed. With `EnableAutoSave(false)`, all changes stay in memory until `SavePolicyAsync()` commits them atomically across all contexts using a shared connection-level transaction.
 >
-> - ✅ **原子性:** 相同连接对象 + `EnableAutoSave(false)` + `SavePolicyAsync()`
-> - ❌ **非原子性:** AutoSave 开启、不同连接对象、不同数据库
+> - ✅ **Atomic:** Same `DbConnection` object + `EnableAutoSave(false)` + `SavePolicyAsync()`
+> - ❌ **Not Atomic:** AutoSave ON, separate `DbConnection` objects, different databases
 >
-> 详见 [EnableAutoSave 和事务原子性](MULTI_CONTEXT_USAGE_GUIDE_zh.md#enableautosave-和事务原子性)。
+> See detailed explanation in [EnableAutoSave and Transaction Atomicity](MULTI_CONTEXT_USAGE_GUIDE.md#enableautosave-and-transaction-atomicity).
 
-### 文档
+### Documentation
 
-- **[多客户端使用指南](MULTI_CONTEXT_USAGE_GUIDE_zh.md)** - 完整的分步指南和示例
-- **[多客户端设计](MULTI_CONTEXT_DESIGN_zh.md)** - 详细的设计文档和限制说明
-- **[集成测试设置](Casbin.Adapter.SqlSugar.IntegrationTest/Integration/README_zh.md)** - 如何在本地运行事务完整性测试
+- **[Multi-Context Usage Guide](MULTI_CONTEXT_USAGE_GUIDE.md)** - Complete step-by-step guide with examples
+- **[Multi-Context Design](MULTI_CONTEXT_DESIGN.md)** - Detailed design documentation and limitations
+- **[Integration Tests Setup](Casbin.Persist.Adapter.EFCore.UnitTest/Integration/README.md)** - How to run transaction integrity tests locally
 
-## 获取帮助
+## Getting Help
 
 - [Casbin.NET](https://github.com/casbin/Casbin.NET)
-- [SqlSugar ORM](https://github.com/DotNetNext/SqlSugar)
-- [原 EFCore Adapter](https://github.com/casbin-net/efcore-adapter)
 
-## 许可证
+## License
 
-此项目采用 Apache 2.0 许可证。查看 [LICENSE](LICENSE) 文件获取完整许可证文本。
+This project is under Apache 2.0 License. See the [LICENSE](LICENSE) file for the full license text.
