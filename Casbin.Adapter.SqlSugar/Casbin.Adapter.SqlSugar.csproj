@@ -6,25 +6,32 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageId>Casbin.NET.Adapter.SqlSugar</PackageId>
-    <PackageIcon>casbin.png</PackageIcon>
-    <Authors>Casbin.NET</Authors>
-    <RepositoryType>GIT</RepositoryType>
-    <RepositoryUrl>https://github.com/casbin-net/sqlSugar-adapter</RepositoryUrl>
-    <Copyright>Apache License 2.0</Copyright>
+    <PackageId>Casbin.NET.Adapter.SqlSugar</PackageId> <!-- 建议加上组织前缀 -->
+    <Version>1.0.0</Version>
+    <Authors>SharpFort</Authors>
+    <Company>SharpFort</Company>
+    <Description>SqlSugar adapter for Casbin.NET. High-performance access control library.</Description>
+    <PackageProjectUrl>https://github.com/SharpFort/sqlsugar-adapter</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SharpFort/sqlsugar-adapter</RepositoryUrl>
+    <PackageTags>casbin;access-control;rbac;acl;abac;sqlsugar;orm;adapter</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/casbin-net/sqlSugar-adapter</PackageProjectUrl>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageReadmeFile>README.md</PackageReadmeFile> <!-- 可选，需配置 -->
+    <PackageIcon>casbin.png</PackageIcon>
+    <RepositoryType>GIT</RepositoryType>
+    <Copyright>Apache License 2.0</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Casbin.NET" Version="2.19.1" />
-    <PackageReference Include="SqlSugarCore" Version="5.1.4.167" />
-    <PackageReference Include="Npgsql" Version="8.0.5" />
+    <PackageReference Include="SqlSugarCore" Version="5.1.4.211" />
+    <PackageReference Include="Npgsql" Version="10.0.1" />
   </ItemGroup>
 
 
   <ItemGroup>
     <None Include="casbin.png" Pack="true" Visible="false" PackagePath="" />
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

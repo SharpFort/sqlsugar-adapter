@@ -14,6 +14,7 @@ Efficiently load and save Casbin policies from any SqlSugar-supported database.
 | [**Usage Guide**](MULTI_CONTEXT_USAGE_GUIDE.md) | 🚀 **Start Here!** Step-by-step guide for basic and multi-context setup. |
 | [**Design Document**](MULTI_CONTEXT_DESIGN.md) | 🧠 Technical architecture validation and deep dive. |
 | [**Integration Tests**](Casbin.Adapter.SqlSugar.IntegrationTest/Integration/README.md) | 🧪 How to run transaction integrity tests. |
+| [**Unit Tests**](Casbin.Adapter.SqlSugar.UnitTest/README.md) | 🧩 Fast validation for core logic. |
 | [**Multi-Tenant Guide**](MULTI_TENANT_GUIDE.md) | 🏢 Strategies for multi-tenant applications. |
 | [**中文文档**](README_zh.md) | 🇨🇳 Switch to Chinese Documentation. |
 
@@ -33,7 +34,7 @@ Efficiently load and save Casbin policies from any SqlSugar-supported database.
 Or via CLI:
 
 ```bash
-dotnet add package Casbin.NET.Adapter.SqlSugar
+dotnet add package SharpFort.Casbin.NET.Adapter.SqlSugar
 ```
 
 ## 🚀 Quick Start

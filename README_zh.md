@@ -14,6 +14,7 @@
 | [**使用指南**](MULTI_CONTEXT_USAGE_GUIDE_zh.md) | 🚀 **从这里开始！** 基础配置与多上下文实战指南。 |
 | [**设计文档**](MULTI_CONTEXT_DESIGN_zh.md) | 🧠 多上下文支持的技术架构与设计细节。 |
 | [**集成测试**](Casbin.Adapter.SqlSugar.IntegrationTest/Integration/README_zh.md) | 🧪 如何运行事务一致性集成测试。 |
+| [**单元测试**](Casbin.Adapter.SqlSugar.UnitTest/README_zh.md) | 🧩 核心逻辑的快速验证。 |
 | [**Multi-Tenant Guide**](MULTI_TENANT_GUIDE.md) | 🏢 (英文) 多租户应用策略方案。 |
 | [**English Docs**](README.md) | 🇺🇸 切换至英文文档。 |
 
