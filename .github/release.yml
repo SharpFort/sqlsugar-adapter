@@ -1,0 +1,38 @@
+changelog:
+  exclude:
+    labels:
+      - ignore
+      - skip-changelog
+    authors:
+      - dependabot
+  categories:
+    - title: "🚀 Features"
+      labels:
+        - feat
+        - feature
+        - enhancement
+    - title: "🐛 Bug Fixes"
+      labels:
+        - fix
+        - bug
+        - bugfix
+    - title: "⚠️ Breaking Changes"
+      labels:
+        - breaking
+        - breaking-change
+    - title: "📚 Documentation"
+      labels:
+        - docs
+        - documentation
+    - title: "🏃 Performance"
+      labels:
+        - perf
+        - performance
+    - title: "🧰 Maintenance"
+      labels:
+        - chore
+        - refactor
+        - test
+    - title: "Other Changes"
+      labels:
+        - "*"

@@ -6,21 +6,28 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageId>Casbin.NET.Adapter.SqlSugar</PackageId> <!-- 建议加上组织前缀 -->
+    <PackageId>Casbin.NET.Adapter.SqlSugar</PackageId>
     <Version>1.0.0</Version>
     <Authors>SharpFort</Authors>
     <Company>SharpFort</Company>
-    <Description>SqlSugar adapter for Casbin.NET. High-performance access control library.</Description>
+    <Description>SqlSugar adapter for Casbin.NET. High-performance access control library supporting multi-context scenarios, atomic transactions, and all SqlSugar-supported databases (MySQL, PostgreSQL, SQL Server, SQLite, Oracle, etc.).</Description>
     <PackageProjectUrl>https://github.com/SharpFort/sqlsugar-adapter</PackageProjectUrl>
     <RepositoryUrl>https://github.com/SharpFort/sqlsugar-adapter</RepositoryUrl>
-    <PackageTags>casbin;access-control;rbac;acl;abac;sqlsugar;orm;adapter</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PackageTags>casbin;access-control;rbac;acl;abac;sqlsugar;orm;adapter;authorization;permission</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReleaseNotes>https://github.com/SharpFort/sqlsugar-adapter/releases</PackageReleaseNotes>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <PackageReadmeFile>README.md</PackageReadmeFile> <!-- 可选，需配置 -->
-    <PackageIcon>casbin.png</PackageIcon>
-    <RepositoryType>GIT</RepositoryType>
-    <Copyright>Apache License 2.0</Copyright>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- <PackageIcon>casbin.png</PackageIcon> -->
+    <Copyright>Copyright (c) 2024 SharpFort</Copyright>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
 
   <ItemGroup>
     <PackageReference Include="Casbin.NET" Version="2.19.1" />
@@ -28,9 +35,8 @@
     <PackageReference Include="Npgsql" Version="10.0.1" />
   </ItemGroup>
 
-
   <ItemGroup>
-    <None Include="casbin.png" Pack="true" Visible="false" PackagePath="" />
+    <!-- <None Include="casbin.png" Pack="true" Visible="false" PackagePath="" /> -->
     <None Include="..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
