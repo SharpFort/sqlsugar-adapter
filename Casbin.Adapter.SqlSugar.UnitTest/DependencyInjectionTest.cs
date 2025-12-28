@@ -20,7 +20,7 @@ namespace Casbin.Adapter.SqlSugar.UnitTest
         }
 
         [Fact]
-        public void ShouldResolveSqlSugarClient()
+        public void ShouldResolveCasbinClient()
         {
             var client = _testHostFixture.Services.GetService<ISqlSugarClient>();
             Assert.NotNull(client);

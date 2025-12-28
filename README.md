@@ -18,6 +18,15 @@ Efficiently load and save Casbin policies from any SqlSugar-supported database.
 | [**Multi-Tenant Guide**](MULTI_TENANT_GUIDE.md) | 🏢 Strategies for multi-tenant applications. |
 | [**中文文档**](README_zh.md) | 🇨🇳 Switch to Chinese Documentation. |
 
+### 🧪 Test Strategy Documentation
+
+This adapter includes comprehensive test coverage with detailed documentation explaining the testing approach:
+
+- **[Client Routing Test](Casbin.Adapter.SqlSugar.UnitTest/TestAdapters/README_ClientRoutingTest.md)** - Validates correct client and table routing for different policy types in multi-context scenarios. This test ensures that the adapter correctly routes policies to their respective clients and tables, preventing data mixing bugs.
+
+- **[Dependency Injection Strategy](Casbin.Adapter.SqlSugar.UnitTest/DependencyInjection_TestStrategy.md)** - Explains why SqlSugar's testing approach differs from EFCore. SqlSugar's `IsAutoCloseConnection` feature eliminates the need for complex `IServiceProvider` lifecycle management, resulting in simpler and more robust tests.
+
+
 ## ✨ Features
 
 - 🔌 **Universal Support**: Works with MySQL, SQL Server, PostgreSQL, SQLite, Oracle, and more.

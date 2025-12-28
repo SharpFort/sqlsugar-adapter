@@ -6,6 +6,7 @@ using Casbin.Model;
 using Casbin.Adapter.SqlSugar.Entities;
 using Casbin.Adapter.SqlSugar.UnitTest.Extensions;
 using Casbin.Adapter.SqlSugar.UnitTest.Fixtures;
+using Casbin.Adapter.SqlSugar.UnitTest.TestAdapters;
 using SqlSugar;
 using Xunit;
 using Casbin.Adapter.SqlSugar;
@@ -394,6 +395,74 @@ namespace Casbin.Adapter.SqlSugar.UnitTest
 
             // 'p' 和 'g' 类型应该路由到不同的客户端
             Assert.NotSame(pClient, gClient);
+        }
+
+        [Fact]
+        public void TestCorrectClientAndTableRouting()
+        {
+            // 此测试验证 SqlSugar 适配器正确地将不同的策略类型路由到各自的客户端和表。
+            // 这是 EFCore 适配器中 DbSet 缓存测试的 SqlSugar 等效测试。
+            //
+            // 关键验证点：
+            // 1. 每个策略类型（'p' 和 'g'）应该路由到正确的客户端（仅在第一次访问时）
+            // 2. 数据应该被写入到正确的客户端/数据库
+            // 3. 策略类型应该被正确保留
+            // 4. 后续对同一策略类型的操作应该使用相同的客户端引用
+
+            // Arrange
+            var provider = _multiContextProviderFixture.GetMultiContextProvider("ClientRouting");
+            var (policyClient, groupingClient) = _multiContextProviderFixture.GetSeparateClients("ClientRouting");
+
+            policyClient.Clear();
+            groupingClient.Clear();
+
+            // 创建路由跟踪器
+            var routingTracker = new Dictionary<string, ClientRoutingInfo>();
+            var adapter = new ClientRoutingTestAdapter(provider, routingTracker);
+            var enforcer = new Enforcer(_modelProvideFixture.GetNewRbacModel(), adapter);
+
+            // Act - 添加不同类型的策略
+            enforcer.AddPolicy("alice", "data1", "read");      // Type 'p' - 第一次调用应该路由到策略客户端
+            enforcer.AddPolicy("bob", "data2", "write");       // Type 'p' - 应该使用相同的客户端引用
+            enforcer.AddGroupingPolicy("alice", "admin");      // Type 'g' - 不同类型，应该路由到分组客户端
+            enforcer.AddGroupingPolicy("bob", "user");         // Type 'g' - 应该使用相同的客户端引用
+
+            // Assert 1 - 验证路由跟踪器记录了两种策略类型
+            Assert.Equal(2, routingTracker.Count);
+            Assert.True(routingTracker.ContainsKey("p"));
+            Assert.True(routingTracker.ContainsKey("g"));
+
+            // Assert 2 - 验证每种类型都被调用了正确的次数
+            Assert.Equal(2, routingTracker["p"].CallCount);  // alice 和 bob 的策略
+            Assert.Equal(2, routingTracker["g"].CallCount);  // alice 和 bob 的分组
+
+            // Assert 3 - 验证 'p' 和 'g' 路由到不同的客户端实例
+            var pRoutedClient = routingTracker["p"].Client;
+            var gRoutedClient = routingTracker["g"].Client;
+            Assert.NotSame(pRoutedClient, gRoutedClient);
+
+            // Assert 4 - 验证数据被写入到正确的客户端
+            Assert.Equal(2, policyClient.Queryable<CasbinRule>().Count());
+            Assert.Equal(2, groupingClient.Queryable<CasbinRule>().Count());
+
+            // Assert 5 - 验证策略类型被正确保留
+            var policyRules = policyClient.Queryable<CasbinRule>().ToList();
+            Assert.All(policyRules, p => Assert.Equal("p", p.PType));
+
+            var groupingRules = groupingClient.Queryable<CasbinRule>().ToList();
+            Assert.All(groupingRules, g => Assert.Equal("g", g.PType));
+
+            // Assert 6 - 验证数据内容正确
+            Assert.Contains(policyRules, p => p.V0 == "alice" && p.V1 == "data1" && p.V2 == "read");
+            Assert.Contains(policyRules, p => p.V0 == "bob" && p.V1 == "data2" && p.V2 == "write");
+            Assert.Contains(groupingRules, g => g.V0 == "alice" && g.V1 == "admin");
+            Assert.Contains(groupingRules, g => g.V0 == "bob" && g.V1 == "user");
+
+            // Assert 7 - 验证路由到的客户端与提供器返回的客户端一致
+            var providerPolicyClient = provider.GetClientForPolicyType("p");
+            var providerGroupingClient = provider.GetClientForPolicyType("g");
+            Assert.Same(pRoutedClient, providerPolicyClient);
+            Assert.Same(gRoutedClient, providerGroupingClient);
         }
     }
 }

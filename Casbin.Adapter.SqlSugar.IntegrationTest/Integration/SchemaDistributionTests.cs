@@ -213,13 +213,15 @@ namespace Casbin.Adapter.SqlSugar.UnitTest.Integration
 
                 // 创建 Enforcer - 使用 Enforcer(model, adapter) 模式
                 var model = DefaultModel.CreateFromFile(ModelPath);
-                var enforcer = new Enforcer(model, adapter);
+                // var enforcer = new Enforcer(model, adapter);
 
                 // 【2024/12/21 修复测试隔离问题】
                 // Enforcer(model, adapter) 构造函数会自动调用 LoadPolicy() 从数据库加载现有数据。
                 // 这可能包含之前测试运行遗留的数据，导致测试结果不正确。
                 // 调用 ClearPolicy() 清空内存中的策略，确保测试从干净状态开始。
-                enforcer.ClearPolicy();
+                // enforcer.ClearPolicy();
+                var enforcer = new Enforcer(model);
+                enforcer.SetAdapter(adapter);
 
                 // 将策略添加到内存模型中（尚未持久化）
                 enforcer.AddPolicy("alice", "data1", "read");      // → 路由到 casbin_policies
@@ -322,10 +324,12 @@ namespace Casbin.Adapter.SqlSugar.UnitTest.Integration
                 // 5. 创建 Enforcer - 使用与单元测试相同的构造函数模式
                 // 注意：使用 Enforcer(model, adapter) 而不是 Enforcer(model) + SetAdapter
                 var model = DefaultModel.CreateFromFile(ModelPath);
-                var enforcer = new Enforcer(model, adapter);
+                // var enforcer = new Enforcer(model, adapter);
 
                 // 【2024/12/21 修复测试隔离问题】清空自动加载的历史数据
-                enforcer.ClearPolicy();
+                // enforcer.ClearPolicy();
+                var enforcer = new Enforcer(model);
+                enforcer.SetAdapter(adapter);
 
                 // 6. 向内存模型添加策略
                 enforcer.AddPolicy("bob", "data2", "write");         // → 路由到 casbin_policies
