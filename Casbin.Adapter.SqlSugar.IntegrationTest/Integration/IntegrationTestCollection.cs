@@ -1,7 +1,7 @@
 using Xunit;
 using Casbin.Adapter.SqlSugar.UnitTest.Integration;
 
-namespace Casbin.Adapter.SqlSugar.IntegrationTest.Integration
+namespace Casbin.Adapter.SqlSugar.UnitTest.Integration
 {
     /// <summary>
     /// Collection definition for integration tests.

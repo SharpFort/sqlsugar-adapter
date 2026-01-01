@@ -43,7 +43,7 @@ This adapter includes comprehensive test coverage with detailed documentation ex
 Or via CLI:
 
 ```bash
-dotnet add package SharpFort.Casbin.NET.Adapter.SqlSugar
+dotnet add package Casbin.NET.Adapter.SqlSugar
 ```
 
 ## 🚀 Quick Start

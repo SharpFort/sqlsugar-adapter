@@ -29,6 +29,8 @@ Supports .NET 8.0, 9.0, and 10.0.
 
 ```bash
 dotnet test Casbin.Adapter.SqlSugar.UnitTest
+or
+dotnet test Casbin.Adapter.SqlSugar.UnitTest -c Release
 ```
 
 ### Run specific test

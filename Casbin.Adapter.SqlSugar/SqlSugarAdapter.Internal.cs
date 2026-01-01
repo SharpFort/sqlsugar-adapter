@@ -50,17 +50,15 @@ namespace Casbin.Adapter.SqlSugar
             
             // 获取多 Schema 场景下的完全限定表名
             var tableName = _clientProvider.GetTableNameForPolicyType(policyType);
-            Console.WriteLine($"[DEBUG InternalAddPolicyAsync] policyType={policyType}, tableName={tableName ?? "null"}, rule.V0={rule.V0}");
             
+            // 单条插入通常是原子的，不需要显式事务，除非有特殊需求
             if (!string.IsNullOrEmpty(tableName))
             {
-                var result = await client.Insertable(rule).AS(tableName).ExecuteCommandAsync();
-                Console.WriteLine($"[DEBUG InternalAddPolicyAsync] Inserted with .AS({tableName}), result={result}");
+                await client.Insertable(rule).AS(tableName).ExecuteCommandAsync();
             }
             else
             {
-                var result = await client.Insertable(rule).ExecuteCommandAsync();
-                Console.WriteLine($"[DEBUG InternalAddPolicyAsync] Inserted without .AS, result={result}");
+                await client.Insertable(rule).ExecuteCommandAsync();
             }
         }
 
@@ -75,13 +73,26 @@ namespace Casbin.Adapter.SqlSugar
             
             // 获取多 Schema 场景下的完全限定表名
             var tableName = _clientProvider.GetTableNameForPolicyType(policyType);
-            if (!string.IsNullOrEmpty(tableName))
+            
+            try
             {
-                client.Insertable(rules).AS(tableName).ExecuteCommand();
+                client.Ado.BeginTran();
+                
+                if (!string.IsNullOrEmpty(tableName))
+                {
+                    client.Insertable(rules).AS(tableName).ExecuteCommand();
+                }
+                else
+                {
+                    client.Insertable(rules).ExecuteCommand();
+                }
+                
+                client.Ado.CommitTran();
             }
-            else
+            catch
             {
-                client.Insertable(rules).ExecuteCommand();
+                client.Ado.RollbackTran();
+                throw;
             }
         }
 
@@ -96,13 +107,26 @@ namespace Casbin.Adapter.SqlSugar
             
             // 获取多 Schema 场景下的完全限定表名
             var tableName = _clientProvider.GetTableNameForPolicyType(policyType);
-            if (!string.IsNullOrEmpty(tableName))
+            
+            try
             {
-                await client.Insertable(rules).AS(tableName).ExecuteCommandAsync();
+                client.Ado.BeginTran();
+                
+                if (!string.IsNullOrEmpty(tableName))
+                {
+                    await client.Insertable(rules).AS(tableName).ExecuteCommandAsync();
+                }
+                else
+                {
+                    await client.Insertable(rules).ExecuteCommandAsync();
+                }
+                
+                client.Ado.CommitTran();
             }
-            else
+            catch
             {
-                await client.Insertable(rules).ExecuteCommandAsync();
+                client.Ado.RollbackTran();
+                throw;
             }
         }
 
@@ -210,17 +234,43 @@ namespace Casbin.Adapter.SqlSugar
 
         protected virtual void InternalRemovePolicies(string section, string policyType, IReadOnlyList<IPolicyValues> valuesList)
         {
-            foreach (var values in valuesList)
+            var client = GetClientForPolicyType(policyType);
+            try
             {
-                InternalRemovePolicy(section, policyType, values);
+                client.Ado.BeginTran();
+                
+                foreach (var values in valuesList)
+                {
+                    InternalRemovePolicy(section, policyType, values);
+                }
+                
+                client.Ado.CommitTran();
+            }
+            catch
+            {
+                client.Ado.RollbackTran();
+                throw;
             }
         }
 
         protected virtual async Task InternalRemovePoliciesAsync(string section, string policyType, IReadOnlyList<IPolicyValues> valuesList)
         {
-            foreach (var values in valuesList)
+            var client = GetClientForPolicyType(policyType);
+            try
             {
-                await InternalRemovePolicyAsync(section, policyType, values);
+                client.Ado.BeginTran();
+                
+                foreach (var values in valuesList)
+                {
+                    await InternalRemovePolicyAsync(section, policyType, values);
+                }
+                
+                client.Ado.CommitTran();
+            }
+            catch
+            {
+                client.Ado.RollbackTran();
+                throw;
             }
         }
 
@@ -230,14 +280,36 @@ namespace Casbin.Adapter.SqlSugar
 
         protected virtual void InternalUpdatePolicy(string section, string policyType, IPolicyValues oldValues, IPolicyValues newValues)
         {
-            InternalRemovePolicy(section, policyType, oldValues);
-            InternalAddPolicy(section, policyType, newValues);
+            var client = GetClientForPolicyType(policyType);
+            try
+            {
+                client.Ado.BeginTran();
+                InternalRemovePolicy(section, policyType, oldValues);
+                InternalAddPolicy(section, policyType, newValues);
+                client.Ado.CommitTran();
+            }
+            catch
+            {
+                client.Ado.RollbackTran();
+                throw;
+            }
         }
 
         protected virtual async Task InternalUpdatePolicyAsync(string section, string policyType, IPolicyValues oldValues, IPolicyValues newValues)
         {
-            await InternalRemovePolicyAsync(section, policyType, oldValues);
-            await InternalAddPolicyAsync(section, policyType, newValues);
+            var client = GetClientForPolicyType(policyType);
+            try
+            {
+                client.Ado.BeginTran();
+                await InternalRemovePolicyAsync(section, policyType, oldValues);
+                await InternalAddPolicyAsync(section, policyType, newValues);
+                client.Ado.CommitTran();
+            }
+            catch
+            {
+                client.Ado.RollbackTran();
+                throw;
+            }
         }
 
         protected virtual void InternalUpdatePolicies(string section, string policyType, IReadOnlyList<IPolicyValues> oldValuesList, IReadOnlyList<IPolicyValues> newValuesList)
@@ -247,9 +319,24 @@ namespace Casbin.Adapter.SqlSugar
                 throw new ArgumentException("Old and new values lists must have the same count");
             }
             
-            for (int i = 0; i < oldValuesList.Count; i++)
+            var client = GetClientForPolicyType(policyType);
+            try
             {
-                InternalUpdatePolicy(section, policyType, oldValuesList[i], newValuesList[i]);
+                client.Ado.BeginTran();
+                
+                for (int i = 0; i < oldValuesList.Count; i++)
+                {
+                    // Directly call atomic delete/insert to avoid nested transaction from InternalUpdatePolicy
+                    InternalRemovePolicy(section, policyType, oldValuesList[i]);
+                    InternalAddPolicy(section, policyType, newValuesList[i]);
+                }
+                
+                client.Ado.CommitTran();
+            }
+            catch
+            {
+                client.Ado.RollbackTran();
+                throw;
             }
         }
 
@@ -260,9 +347,24 @@ namespace Casbin.Adapter.SqlSugar
                 throw new ArgumentException("Old and new values lists must have the same count");
             }
             
-            for (int i = 0; i < oldValuesList.Count; i++)
+            var client = GetClientForPolicyType(policyType);
+            try
             {
-                await InternalUpdatePolicyAsync(section, policyType, oldValuesList[i], newValuesList[i]);
+                client.Ado.BeginTran();
+                
+                for (int i = 0; i < oldValuesList.Count; i++)
+                {
+                    // Directly call atomic delete/insert to avoid nested transaction from InternalUpdatePolicy
+                    await InternalRemovePolicyAsync(section, policyType, oldValuesList[i]);
+                    await InternalAddPolicyAsync(section, policyType, newValuesList[i]);
+                }
+                
+                client.Ado.CommitTran();
+            }
+            catch
+            {
+                client.Ado.RollbackTran();
+                throw;
             }
         }
 

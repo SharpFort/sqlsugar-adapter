@@ -74,6 +74,10 @@ ConnectionString = "Host=localhost;Database=casbin_integration_sqlsugar;Username
 
 ```bash
 dotnet test --filter "Category=Integration"
+or
+dotnet test Casbin.Adapter.SqlSugar.IntegrationTest
+or
+dotnet test Casbin.Adapter.SqlSugar.IntegrationTest -c Release
 ```
 
 ### 运行特定测试

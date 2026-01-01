@@ -74,6 +74,10 @@ Supports .NET 8.0, .NET 9.0 and .NET 10.0.
 
 ```bash
 dotnet test --filter "Category=Integration"
+or
+dotnet test Casbin.Adapter.SqlSugar.IntegrationTest
+or
+dotnet test Casbin.Adapter.SqlSugar.IntegrationTest -c Release
 ```
 
 ### Run in Release Mode

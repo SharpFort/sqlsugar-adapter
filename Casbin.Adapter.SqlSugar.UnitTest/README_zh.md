@@ -29,6 +29,8 @@
 
 ```bash
 dotnet test Casbin.Adapter.SqlSugar.UnitTest
+or
+dotnet test Casbin.Adapter.SqlSugar.UnitTest -c Release
 ```
 
 ### 运行特定测试
