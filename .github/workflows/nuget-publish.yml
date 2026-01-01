@@ -116,6 +116,19 @@ jobs:
         name: symbol-packages
         path: ./artifacts/*.snupkg
     
+    - name: Generate Release Notes
+      id: generate_notes
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        TAG_NAME=${GITHUB_REF#refs/tags/}
+        NOTES_JSON=$(gh api --method POST -H "Accept: application/vnd.github+json" /repos/${{ github.repository }}/releases/generate-notes -f tag_name=$TAG_NAME)
+        NOTES_BODY=$(echo "$NOTES_JSON" | jq -r .body)
+        echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+        echo "$NOTES_BODY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
     - name: Create GitHub Release
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
@@ -148,6 +161,10 @@ jobs:
           
           - [Usage Guide](https://github.com/SharpFort/sqlsugar-adapter/blob/main/MULTI_CONTEXT_USAGE_GUIDE.md)
           - [中文文档](https://github.com/SharpFort/sqlsugar-adapter/blob/main/README_zh.md)
+          
+          ---
+          
+          ${{ steps.generate_notes.outputs.RELEASE_NOTES }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
