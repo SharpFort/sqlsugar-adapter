@@ -382,9 +382,19 @@ namespace Casbin.Adapter.SqlSugar
         {
             var primaryClient = rulesByClient.First().Key;
             
+            // 【2026/01/26 修复 SQLite 锁问题】
+            // 检查是否存在外部事务（例如 ABP UnitOfWork）。
+            // 如果存在，复用该事务；如果不存在，则开启本地新事务。
+            bool isLocalTransaction = false;
+            
             try
             {
-                primaryClient.Ado.BeginTran();
+                // 仅当没有活动事务时才开启新事务
+                if (primaryClient.Ado.Transaction == null)
+                {
+                    primaryClient.Ado.BeginTran();
+                    isLocalTransaction = true;
+                }
                 
                 // 【多 Schema 支持】删除时需要根据策略类型确定目标表
                 foreach (var group in rulesByClient)
@@ -426,11 +436,19 @@ namespace Casbin.Adapter.SqlSugar
                     }
                 }
                 
-                primaryClient.Ado.CommitTran();
+                // 仅当是本地开启的事务时才提交
+                if (isLocalTransaction)
+                {
+                    primaryClient.Ado.CommitTran();
+                }
             }
             catch
             {
-                primaryClient.Ado.RollbackTran();
+                // 仅当是本地开启的事务时才回滚
+                if (isLocalTransaction)
+                {
+                    primaryClient.Ado.RollbackTran();
+                }
                 throw;
             }
         }
@@ -449,9 +467,19 @@ namespace Casbin.Adapter.SqlSugar
         {
             var primaryClient = rulesByClient.First().Key;
             
+            // 【2026/01/26 修复 SQLite 锁问题】
+            // 检查是否存在外部事务（例如 ABP UnitOfWork）。
+            // 如果存在，复用该事务；如果不存在，则开启本地新事务。
+            bool isLocalTransaction = false;
+
             try
             {
-                primaryClient.Ado.BeginTran();
+                // 仅当没有活动事务时才开启新事务
+                if (primaryClient.Ado.Transaction == null)
+                {
+                    primaryClient.Ado.BeginTran();
+                    isLocalTransaction = true;
+                }
                 
                 // 【多 Schema 支持】删除时需要根据策略类型确定目标表
                 // 遍历所有规则组，为每个策略类型执行删除操作
@@ -501,11 +529,19 @@ namespace Casbin.Adapter.SqlSugar
                     }
                 }
                 
-                primaryClient.Ado.CommitTran();
+                // 仅当是本地开启的事务时才提交
+                if (isLocalTransaction)
+                {
+                    primaryClient.Ado.CommitTran();
+                }
             }
             catch
             {
-                primaryClient.Ado.RollbackTran();
+                // 仅当是本地开启的事务时才回滚
+                if (isLocalTransaction)
+                {
+                    primaryClient.Ado.RollbackTran();
+                }
                 throw;
             }
         }
@@ -529,9 +565,17 @@ namespace Casbin.Adapter.SqlSugar
                 
                 var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
                 
+                // 【2026/01/26 修复 SQLite 锁问题】
+                bool isLocalTransaction = false;
+
                 try
                 {
-                    client.Ado.BeginTran();
+                    // 仅当没有活动事务时才开启新事务
+                    if (client.Ado.Transaction == null)
+                    {
+                        client.Ado.BeginTran();
+                        isLocalTransaction = true;
+                    }
                     
                     if (!string.IsNullOrEmpty(tableName))
                     {
@@ -555,11 +599,19 @@ namespace Casbin.Adapter.SqlSugar
                         }
                     }
                     
-                    client.Ado.CommitTran();
+                    // 仅当是本地开启的事务时才提交
+                    if (isLocalTransaction)
+                    {
+                        client.Ado.CommitTran();
+                    }
                 }
                 catch (Exception ex)
                 {
-                    client.Ado.RollbackTran();
+                    // 仅当是本地开启的事务时才回滚
+                    if (isLocalTransaction)
+                    {
+                        client.Ado.RollbackTran();
+                    }
                     exceptions.Add(ex);
                 }
             }
@@ -594,9 +646,17 @@ namespace Casbin.Adapter.SqlSugar
                 // 获取此策略类型对应的完全限定表名
                 var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
                 
+                // 【2026/01/26 修复 SQLite 锁问题】
+                bool isLocalTransaction = false;
+
                 try
                 {
-                    client.Ado.BeginTran();
+                    // 仅当没有活动事务时才开启新事务
+                    if (client.Ado.Transaction == null)
+                    {
+                        client.Ado.BeginTran();
+                        isLocalTransaction = true;
+                    }
                     
                     // 使用 .AS() 方法指定目标表
                     if (!string.IsNullOrEmpty(tableName))
@@ -621,11 +681,19 @@ namespace Casbin.Adapter.SqlSugar
                         }
                     }
                     
-                    client.Ado.CommitTran();
+                    // 仅当是本地开启的事务时才提交
+                    if (isLocalTransaction)
+                    {
+                        client.Ado.CommitTran();
+                    }
                 }
                 catch (Exception ex)
                 {
-                    client.Ado.RollbackTran();
+                    // 仅当是本地开启的事务时才回滚
+                    if (isLocalTransaction)
+                    {
+                        client.Ado.RollbackTran();
+                    }
                     // 收集异常但继续处理其他组，实现非原子性行为
                     exceptions.Add(ex);
                 }
