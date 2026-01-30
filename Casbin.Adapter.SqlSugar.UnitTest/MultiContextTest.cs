@@ -199,6 +199,13 @@ namespace Casbin.Adapter.SqlSugar.UnitTest
             Assert.Single(enforcer.GetGroupingPolicy());
         }
 
+        /// <summary>
+        /// 【2026/01/30 注意】此测试原本用于验证多 Client SavePolicy 功能。
+        /// 由于 SQLite 使用文件级锁，不支持多连接同时写入，现在改为验证 SQLite 正确拒绝此操作。
+        /// 多 Client SavePolicy 功能在 PostgreSQL/MySQL 下仍然有效，由集成测试覆盖：
+        /// - TransactionIntegrityTests.SavePolicy_WithSharedConnection_ShouldWriteToAllContextsAtomically
+        /// - SchemaDistributionTests.SavePolicy_SeparateConnections_ShouldDistributeAcrossSchemas
+        /// </summary>
         [Fact]
         public void TestMultiClientSavePolicy()
         {
@@ -217,6 +224,15 @@ namespace Casbin.Adapter.SqlSugar.UnitTest
             enforcer.AddPolicy("bob", "data2", "write");
             enforcer.AddGroupingPolicy("alice", "admin");
 
+            // 【2026/01/30 更新】SQLite 下多 Client SavePolicy 现在会正确抛出 InvalidOperationException
+            // 这是预期行为，因为 SQLite 使用文件级锁，不支持多连接同时写入
+            var exception = Assert.Throws<InvalidOperationException>(() => enforcer.SavePolicy());
+            Assert.Contains("SQLite does not support SavePolicy across multiple SqlSugarClient instances", exception.Message);
+            
+            // ==================== 原始测试逻辑（适用于 PostgreSQL/MySQL/SQL Server）====================
+            // 以下代码保留作为文档参考，展示多 Client SavePolicy 在支持多连接写入的数据库上的预期行为
+            // 这些断言在集成测试中使用 PostgreSQL 进行验证
+            /*
             // Act - 保存应该将策略分发到正确的客户端
             enforcer.SavePolicy();
 
@@ -236,8 +252,14 @@ namespace Casbin.Adapter.SqlSugar.UnitTest
             TestGetGroupingPolicy(newEnforcer, AsList(
                 AsList("alice", "admin")
             ));
+            */
         }
 
+        /// <summary>
+        /// 【2026/01/30 注意】此测试原本用于验证多 Client SavePolicyAsync 功能。
+        /// 由于 SQLite 使用文件级锁，不支持多连接同时写入，现在改为验证 SQLite 正确拒绝此操作。
+        /// 多 Client SavePolicyAsync 功能在 PostgreSQL/MySQL 下仍然有效，由集成测试覆盖。
+        /// </summary>
         [Fact]
         public async Task TestMultiClientSavePolicyAsync()
         {
@@ -254,12 +276,20 @@ namespace Casbin.Adapter.SqlSugar.UnitTest
             enforcer.AddPolicy("alice", "data1", "read");
             enforcer.AddGroupingPolicy("alice", "admin");
 
+            // 【2026/01/30 更新】SQLite 下多 Client SavePolicyAsync 现在会正确抛出 InvalidOperationException
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => enforcer.SavePolicyAsync());
+            Assert.Contains("SQLite does not support SavePolicy across multiple SqlSugarClient instances", exception.Message);
+            
+            // ==================== 原始测试逻辑（适用于 PostgreSQL/MySQL/SQL Server）====================
+            // 以下代码保留作为文档参考，展示多 Client SavePolicyAsync 在支持多连接写入的数据库上的预期行为
+            /*
             // Act
             await enforcer.SavePolicyAsync();
 
             // Assert
             Assert.Equal(1, await policyClient.Queryable<CasbinRule>().CountAsync());
             Assert.Equal(1, await groupingClient.Queryable<CasbinRule>().CountAsync());
+            */
         }
 
         [Fact]

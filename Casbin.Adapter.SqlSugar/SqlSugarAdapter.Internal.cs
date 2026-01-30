@@ -382,15 +382,26 @@ namespace Casbin.Adapter.SqlSugar
         {
             var primaryClient = rulesByClient.First().Key;
             
-            // 【2026/01/26 修复 SQLite 锁问题】
+            // 【2026/01/30 修复 SQLite 锁问题 - P0】
+            // SQLite 使用文件级锁，不支持多连接同时写入
+            // 如果检测到多个不同的 Client 实例且数据库类型为 SQLite，抛出明确错误
+            if (primaryClient.CurrentConnectionConfig.DbType == DbType.Sqlite
+                && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
+            {
+                throw new InvalidOperationException(
+                    "SQLite does not support SavePolicy across multiple SqlSugarClient instances. " +
+                    "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
+            }
+            
+            // 【2026/01/30 修复 SQLite 锁问题】
             // 检查是否存在外部事务（例如 ABP UnitOfWork）。
             // 如果存在，复用该事务；如果不存在，则开启本地新事务。
             bool isLocalTransaction = false;
             
             try
             {
-                // 仅当没有活动事务时才开启新事务
-                if (primaryClient.Ado.Transaction == null)
+                // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
+                if (!primaryClient.Ado.IsAnyTran())
                 {
                     primaryClient.Ado.BeginTran();
                     isLocalTransaction = true;
@@ -467,15 +478,26 @@ namespace Casbin.Adapter.SqlSugar
         {
             var primaryClient = rulesByClient.First().Key;
             
-            // 【2026/01/26 修复 SQLite 锁问题】
+            // 【2026/01/30 修复 SQLite 锁问题 - P0】
+            // SQLite 使用文件级锁，不支持多连接同时写入
+            // 如果检测到多个不同的 Client 实例且数据库类型为 SQLite，抛出明确错误
+            if (primaryClient.CurrentConnectionConfig.DbType == DbType.Sqlite
+                && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
+            {
+                throw new InvalidOperationException(
+                    "SQLite does not support SavePolicy across multiple SqlSugarClient instances. " +
+                    "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
+            }
+            
+            // 【2026/01/30 修复 SQLite 锁问题】
             // 检查是否存在外部事务（例如 ABP UnitOfWork）。
             // 如果存在，复用该事务；如果不存在，则开启本地新事务。
             bool isLocalTransaction = false;
 
             try
             {
-                // 仅当没有活动事务时才开启新事务
-                if (primaryClient.Ado.Transaction == null)
+                // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
+                if (!primaryClient.Ado.IsAnyTran())
                 {
                     primaryClient.Ado.BeginTran();
                     isLocalTransaction = true;
@@ -555,6 +577,18 @@ namespace Casbin.Adapter.SqlSugar
         /// </summary>
         private void SavePolicyWithSeparateTransactions(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
         {
+            // 【2026/01/30 修复 SQLite 锁问题 - P0】
+            // SQLite 使用文件级锁，不支持多连接同时写入
+            var firstClient = rulesByClient.FirstOrDefault()?.Key;
+            if (firstClient != null 
+                && firstClient.CurrentConnectionConfig.DbType == DbType.Sqlite
+                && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
+            {
+                throw new InvalidOperationException(
+                    "SQLite does not support SavePolicy across multiple SqlSugarClient instances. " +
+                    "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
+            }
+            
             var exceptions = new List<Exception>();
             
             foreach (var group in rulesByClient)
@@ -565,13 +599,13 @@ namespace Casbin.Adapter.SqlSugar
                 
                 var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
                 
-                // 【2026/01/26 修复 SQLite 锁问题】
+                // 【2026/01/30 修复 SQLite 锁问题】
                 bool isLocalTransaction = false;
 
                 try
                 {
-                    // 仅当没有活动事务时才开启新事务
-                    if (client.Ado.Transaction == null)
+                    // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
+                    if (!client.Ado.IsAnyTran())
                     {
                         client.Ado.BeginTran();
                         isLocalTransaction = true;
@@ -633,6 +667,18 @@ namespace Casbin.Adapter.SqlSugar
         /// </summary>
         private async Task SavePolicyWithSeparateTransactionsAsync(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
         {
+            // 【2026/01/30 修复 SQLite 锁问题 - P0】
+            // SQLite 使用文件级锁，不支持多连接同时写入
+            var firstClient = rulesByClient.FirstOrDefault()?.Key;
+            if (firstClient != null 
+                && firstClient.CurrentConnectionConfig.DbType == DbType.Sqlite
+                && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
+            {
+                throw new InvalidOperationException(
+                    "SQLite does not support SavePolicy across multiple SqlSugarClient instances. " +
+                    "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
+            }
+            
             // 收集所有操作过程中的异常
             var exceptions = new List<Exception>();
             
@@ -646,13 +692,13 @@ namespace Casbin.Adapter.SqlSugar
                 // 获取此策略类型对应的完全限定表名
                 var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
                 
-                // 【2026/01/26 修复 SQLite 锁问题】
+                // 【2026/01/30 修复 SQLite 锁问题】
                 bool isLocalTransaction = false;
 
                 try
                 {
-                    // 仅当没有活动事务时才开启新事务
-                    if (client.Ado.Transaction == null)
+                    // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
+                    if (!client.Ado.IsAnyTran())
                     {
                         client.Ado.BeginTran();
                         isLocalTransaction = true;
