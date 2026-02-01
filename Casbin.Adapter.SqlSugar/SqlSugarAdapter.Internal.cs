@@ -376,15 +376,21 @@ namespace Casbin.Adapter.SqlSugar
         /// 【集成测试多 Schema 支持 - 2024/12/21 重构】
         /// 使用共享事务保存策略到多个 Schema/表（同步版本）。
         /// 
-        /// 重构说明：同 SavePolicyWithSharedTransactionAsync，使用 .AS() 方法支持多 Schema。
+        /// 【2026/02/01 修复】逻辑原子性改进
+        /// - 每个策略组的 DELETE + INSERT 是不可分割的逻辑单元
+        /// - 避免"全删未插"的中间态被观察到
+        /// - 异常定位更明确（知道哪个策略类型失败）
         /// </summary>
         private void SavePolicyWithSharedTransaction(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
         {
+            if (rulesByClient == null || rulesByClient.Count == 0)
+                return;
+
             var primaryClient = rulesByClient.First().Key;
             
-            // 【2026/01/30 修复 SQLite 锁问题 - P0】
-            // SQLite 使用文件级锁，不支持多连接同时写入
-            // 如果检测到多个不同的 Client 实例且数据库类型为 SQLite，抛出明确错误
+            // =========================================================
+            // ✅ P0：SQLite 多 Client 防御（必须）
+            // =========================================================
             if (primaryClient.CurrentConnectionConfig.DbType == DbType.Sqlite
                 && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
             {
@@ -393,61 +399,74 @@ namespace Casbin.Adapter.SqlSugar
                     "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
             }
             
-            // 【2026/01/30 修复 SQLite 锁问题】
-            // 检查是否存在外部事务（例如 ABP UnitOfWork）。
-            // 如果存在，复用该事务；如果不存在，则开启本地新事务。
+            // =========================================================
+            // ✅ 事务判断：是否存在外部事务（ABP UOW 等）
+            // =========================================================
+            bool hasOuterTransaction = primaryClient.Ado.IsAnyTran();
             bool isLocalTransaction = false;
             
             try
             {
-                // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
-                if (!primaryClient.Ado.IsAnyTran())
+                // =====================================================
+                // ✅ 若无外部事务，由 Adapter 自行开启
+                // =====================================================
+                if (!hasOuterTransaction)
                 {
                     primaryClient.Ado.BeginTran();
                     isLocalTransaction = true;
                 }
                 
-                // 【多 Schema 支持】删除时需要根据策略类型确定目标表
+                // =====================================================
+                // ✅ 执行所有策略组（每组 DELETE+INSERT 是逻辑原子单元）
+                // =====================================================
                 foreach (var group in rulesByClient)
                 {
                     var client = group.Key;
                     var firstRule = group.FirstOrDefault();
-                    if (firstRule == null) continue;
+                    if (firstRule == null)
+                        continue;
                     
+                    // 获取策略类型对应的表名（支持多 Schema）
                     var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
                     
+                    // -----------------------------
+                    // DELETE
+                    // -----------------------------
                     if (!string.IsNullOrEmpty(tableName))
                     {
-                        client.Deleteable<CasbinRule>().AS(tableName).ExecuteCommand();
+                        client.Deleteable<CasbinRule>()
+                            .AS(tableName)
+                            .ExecuteCommand();
                     }
                     else
                     {
-                        client.Deleteable<CasbinRule>().ExecuteCommand();
+                        client.Deleteable<CasbinRule>()
+                            .ExecuteCommand();
                     }
-                }
-                
-                // 【多 Schema 支持】插入时使用正确的表名
-                foreach (var group in rulesByClient)
-                {
-                    var client = group.Key;
-                    var rules = OnSavePolicy(store, group).ToList();
-                    if (rules.Any())
+                    
+                    // -----------------------------
+                    // INSERT
+                    // -----------------------------
+                    var rulesToSave = OnSavePolicy(store, group).ToList();
+                    if (rulesToSave.Count > 0)
                     {
-                        var policyType = rules.First().PType;
-                        var tableName = _clientProvider.GetTableNameForPolicyType(policyType);
-                        
                         if (!string.IsNullOrEmpty(tableName))
                         {
-                            client.Insertable(rules).AS(tableName).ExecuteCommand();
+                            client.Insertable(rulesToSave)
+                                .AS(tableName)
+                                .ExecuteCommand();
                         }
                         else
                         {
-                            client.Insertable(rules).ExecuteCommand();
+                            client.Insertable(rulesToSave)
+                                .ExecuteCommand();
                         }
                     }
                 }
                 
-                // 仅当是本地开启的事务时才提交
+                // =====================================================
+                // ✅ 提交事务（仅限本地事务）
+                // =====================================================
                 if (isLocalTransaction)
                 {
                     primaryClient.Ado.CommitTran();
@@ -455,11 +474,15 @@ namespace Casbin.Adapter.SqlSugar
             }
             catch
             {
-                // 仅当是本地开启的事务时才回滚
+                // =====================================================
+                // ✅ 回滚事务（仅限本地事务）
+                // =====================================================
                 if (isLocalTransaction)
                 {
                     primaryClient.Ado.RollbackTran();
                 }
+                
+                // ❗ 不吞异常，保证调用方感知失败
                 throw;
             }
         }
@@ -468,19 +491,21 @@ namespace Casbin.Adapter.SqlSugar
         /// 【集成测试多 Schema 支持 - 2024/12/21 重构】
         /// 使用共享事务保存策略到多个 Schema/表。
         /// 
-        /// 重构说明：
-        /// - 原始实现使用默认表名，无法支持 PostgreSQL 多 Schema 场景
-        /// - 新实现通过 GetTableNameForPolicyType 获取每个策略类型对应的完全限定表名
-        /// - 使用 SqlSugar 的 .AS(tableName) 方法在运行时指定目标表
-        /// - 当 GetTableNameForPolicyType 返回 null 时，使用默认表名（保持向后兼容）
+        /// 【2026/02/01 修复】逻辑原子性改进
+        /// - 每个策略组的 DELETE + INSERT 是不可分割的逻辑单元
+        /// - 避免"全删未插"的中间态被观察到
+        /// - 异常定位更明确（知道哪个策略类型失败）
         /// </summary>
         private async Task SavePolicyWithSharedTransactionAsync(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
         {
+            if (rulesByClient == null || rulesByClient.Count == 0)
+                return;
+
             var primaryClient = rulesByClient.First().Key;
             
-            // 【2026/01/30 修复 SQLite 锁问题 - P0】
-            // SQLite 使用文件级锁，不支持多连接同时写入
-            // 如果检测到多个不同的 Client 实例且数据库类型为 SQLite，抛出明确错误
+            // =========================================================
+            // ✅ P0：SQLite 多 Client 防御（必须）
+            // =========================================================
             if (primaryClient.CurrentConnectionConfig.DbType == DbType.Sqlite
                 && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
             {
@@ -489,69 +514,74 @@ namespace Casbin.Adapter.SqlSugar
                     "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
             }
             
-            // 【2026/01/30 修复 SQLite 锁问题】
-            // 检查是否存在外部事务（例如 ABP UnitOfWork）。
-            // 如果存在，复用该事务；如果不存在，则开启本地新事务。
+            // =========================================================
+            // ✅ 事务判断：是否存在外部事务（ABP UOW 等）
+            // =========================================================
+            bool hasOuterTransaction = primaryClient.Ado.IsAnyTran();
             bool isLocalTransaction = false;
 
             try
             {
-                // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
-                if (!primaryClient.Ado.IsAnyTran())
+                // =====================================================
+                // ✅ 若无外部事务，由 Adapter 自行开启
+                // =====================================================
+                if (!hasOuterTransaction)
                 {
                     primaryClient.Ado.BeginTran();
                     isLocalTransaction = true;
                 }
                 
-                // 【多 Schema 支持】删除时需要根据策略类型确定目标表
-                // 遍历所有规则组，为每个策略类型执行删除操作
+                // =====================================================
+                // ✅ 执行所有策略组（每组 DELETE+INSERT 是逻辑原子单元）
+                // =====================================================
                 foreach (var group in rulesByClient)
                 {
                     var client = group.Key;
-                    // 获取该策略类型的第一个规则以确定 policyType
                     var firstRule = group.FirstOrDefault();
-                    if (firstRule == null) continue;
+                    if (firstRule == null)
+                        continue;
                     
-                    // 获取此策略类型对应的完全限定表名（如 "schema.table"）
+                    // 获取策略类型对应的表名（支持多 Schema）
                     var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
                     
-                    // 使用 .AS() 方法指定目标表，如果 tableName 为 null 则使用默认表名
+                    // -----------------------------
+                    // DELETE
+                    // -----------------------------
                     if (!string.IsNullOrEmpty(tableName))
                     {
-                        await client.Deleteable<CasbinRule>().AS(tableName).ExecuteCommandAsync();
+                        await client.Deleteable<CasbinRule>()
+                            .AS(tableName)
+                            .ExecuteCommandAsync();
                     }
                     else
                     {
-                        // 回退到原始行为：使用默认表名
-                        await client.Deleteable<CasbinRule>().ExecuteCommandAsync();
+                        await client.Deleteable<CasbinRule>()
+                            .ExecuteCommandAsync();
                     }
-                }
-                
-                // 【多 Schema 支持】插入时同样需要使用正确的表名
-                foreach (var group in rulesByClient)
-                {
-                    var client = group.Key;
-                    var rules = OnSavePolicy(store, group).ToList();
-                    if (rules.Any())
+                    
+                    // -----------------------------
+                    // INSERT
+                    // -----------------------------
+                    var rulesToSave = OnSavePolicy(store, group).ToList();
+                    if (rulesToSave.Count > 0)
                     {
-                        // 获取此策略类型对应的完全限定表名
-                        var policyType = rules.First().PType;
-                        var tableName = _clientProvider.GetTableNameForPolicyType(policyType);
-                        
-                        // 使用 .AS() 方法指定目标表
                         if (!string.IsNullOrEmpty(tableName))
                         {
-                            await client.Insertable(rules).AS(tableName).ExecuteCommandAsync();
+                            await client.Insertable(rulesToSave)
+                                .AS(tableName)
+                                .ExecuteCommandAsync();
                         }
                         else
                         {
-                            // 回退到原始行为：使用默认表名
-                            await client.Insertable(rules).ExecuteCommandAsync();
+                            await client.Insertable(rulesToSave)
+                                .ExecuteCommandAsync();
                         }
                     }
                 }
                 
-                // 仅当是本地开启的事务时才提交
+                // =====================================================
+                // ✅ 提交事务（仅限本地事务）
+                // =====================================================
                 if (isLocalTransaction)
                 {
                     primaryClient.Ado.CommitTran();
@@ -559,11 +589,15 @@ namespace Casbin.Adapter.SqlSugar
             }
             catch
             {
-                // 仅当是本地开启的事务时才回滚
+                // =====================================================
+                // ✅ 回滚事务（仅限本地事务）
+                // =====================================================
                 if (isLocalTransaction)
                 {
                     primaryClient.Ado.RollbackTran();
                 }
+                
+                // ❗ 不吞异常，保证调用方感知失败
                 throw;
             }
         }
@@ -572,87 +606,118 @@ namespace Casbin.Adapter.SqlSugar
         /// 【集成测试多 Schema 支持 - 2024/12/21 重构】
         /// 使用独立事务保存策略到多个 Schema/表（同步版本）。
         /// 
-        /// 【2024/12/22 修复非原子性行为】
-        /// 当使用独立连接时，各组操作应该相互独立。
+        /// 【2026/02/01 修复】统一事务模式，确保真正的原子性。
+        /// - SQLite 多 Client 检测并明确拒绝
+        /// - 复用外部事务（如 ABP UnitOfWork）
+        /// - 无外部事务时由 Adapter 开启统一事务
+        /// - 不允许部分成功，保证 Casbin 策略一致性
         /// </summary>
         private void SavePolicyWithSeparateTransactions(IPolicyStore store, List<IGrouping<ISqlSugarClient, CasbinRule>> rulesByClient)
         {
             // 【2026/01/30 修复 SQLite 锁问题 - P0】
             // SQLite 使用文件级锁，不支持多连接同时写入
-            var firstClient = rulesByClient.FirstOrDefault()?.Key;
-            if (firstClient != null 
-                && firstClient.CurrentConnectionConfig.DbType == DbType.Sqlite
-                && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
+
+            if (rulesByClient == null || rulesByClient.Count == 0)
+                return;
+
+            var primaryClient = rulesByClient.First().Key;
+
+            // =========================================================
+            // ✅ P0：SQLite 多 Client 防御（必须）
+            // =========================================================
+            if (primaryClient.CurrentConnectionConfig.DbType == DbType.Sqlite &&
+                rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
             {
                 throw new InvalidOperationException(
                     "SQLite does not support SavePolicy across multiple SqlSugarClient instances. " +
                     "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
             }
-            
-            var exceptions = new List<Exception>();
-            
-            foreach (var group in rulesByClient)
-            {
-                var client = group.Key;
-                var firstRule = group.FirstOrDefault();
-                if (firstRule == null) continue;
-                
-                var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
-                
-                // 【2026/01/30 修复 SQLite 锁问题】
-                bool isLocalTransaction = false;
 
-                try
+            // =========================================================
+            // ✅ 事务判断：是否存在外部事务（ABP UOW 等）
+            // =========================================================
+            bool hasOuterTransaction = primaryClient.Ado.IsAnyTran();
+            bool isLocalTransaction = false;
+
+            try
+            {
+                // =====================================================
+                // ✅ 若无外部事务，由 Adapter 自行开启
+                // =====================================================
+                if (!hasOuterTransaction)
                 {
-                    // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
-                    if (!client.Ado.IsAnyTran())
-                    {
-                        client.Ado.BeginTran();
-                        isLocalTransaction = true;
-                    }
-                    
+                    primaryClient.Ado.BeginTran();
+                    isLocalTransaction = true;
+                }
+
+                // =====================================================
+                // ✅ 执行所有策略组（逻辑原子）
+                // =====================================================
+                foreach (var group in rulesByClient)
+                {
+                    var client = group.Key;
+                    var firstRule = group.FirstOrDefault();
+                    if (firstRule == null)
+                        continue;
+
+                    // 获取策略类型对应的表名（支持多 Schema）
+                    var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
+
+                    // -----------------------------
+                    // DELETE
+                    // -----------------------------
                     if (!string.IsNullOrEmpty(tableName))
                     {
-                        client.Deleteable<CasbinRule>().AS(tableName).ExecuteCommand();
+                        client.Deleteable<CasbinRule>()
+                            .AS(tableName)
+                            .ExecuteCommand();
                     }
                     else
                     {
-                        client.Deleteable<CasbinRule>().ExecuteCommand();
+                        client.Deleteable<CasbinRule>()
+                            .ExecuteCommand();
                     }
-                    
+
+                    // -----------------------------
+                    // INSERT
+                    // -----------------------------
                     var rulesToSave = OnSavePolicy(store, group).ToList();
-                    if (rulesToSave.Any())
+                    if (rulesToSave.Count > 0)
                     {
                         if (!string.IsNullOrEmpty(tableName))
                         {
-                            client.Insertable(rulesToSave).AS(tableName).ExecuteCommand();
+                            client.Insertable(rulesToSave)
+                                .AS(tableName)
+                                .ExecuteCommand();
                         }
                         else
                         {
-                            client.Insertable(rulesToSave).ExecuteCommand();
+                            client.Insertable(rulesToSave)
+                                .ExecuteCommand();
                         }
                     }
-                    
-                    // 仅当是本地开启的事务时才提交
-                    if (isLocalTransaction)
-                    {
-                        client.Ado.CommitTran();
-                    }
                 }
-                catch (Exception ex)
+
+                // =====================================================
+                // ✅ 提交事务（仅限本地事务）
+                // =====================================================
+                if (isLocalTransaction)
                 {
-                    // 仅当是本地开启的事务时才回滚
-                    if (isLocalTransaction)
-                    {
-                        client.Ado.RollbackTran();
-                    }
-                    exceptions.Add(ex);
+                    primaryClient.Ado.CommitTran();
                 }
             }
-            
-            if (exceptions.Count > 0)
+            catch
             {
-                throw new AggregateException("One or more save operations failed", exceptions);
+                // =====================================================
+                // ✅ 回滚事务（仅限本地事务）
+                // =====================================================
+                if (isLocalTransaction)
+                {
+                    primaryClient.Ado.RollbackTran();
+                }
+
+                // ❗ 不吞异常，保证调用方感知失败
+                throw;
             }
         }
 
@@ -669,87 +734,191 @@ namespace Casbin.Adapter.SqlSugar
         {
             // 【2026/01/30 修复 SQLite 锁问题 - P0】
             // SQLite 使用文件级锁，不支持多连接同时写入
-            var firstClient = rulesByClient.FirstOrDefault()?.Key;
-            if (firstClient != null 
-                && firstClient.CurrentConnectionConfig.DbType == DbType.Sqlite
-                && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
+
+             if (rulesByClient == null || rulesByClient.Count == 0)
+                return;
+
+            var primaryClient = rulesByClient.First().Key;
+
+            // =========================================================
+            // ✅ P0：SQLite 多 Client 防御（必须）
+            // =========================================================
+            if (primaryClient.CurrentConnectionConfig.DbType == DbType.Sqlite &&
+                rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
             {
                 throw new InvalidOperationException(
                     "SQLite does not support SavePolicy across multiple SqlSugarClient instances. " +
                     "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
             }
-            
-            // 收集所有操作过程中的异常
-            var exceptions = new List<Exception>();
-            
-            // 【多 Schema 支持】遍历每个策略组，为每个 client 执行独立事务
-            foreach (var group in rulesByClient)
-            {
-                var client = group.Key;
-                var firstRule = group.FirstOrDefault();
-                if (firstRule == null) continue;
-                
-                // 获取此策略类型对应的完全限定表名
-                var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
-                
-                // 【2026/01/30 修复 SQLite 锁问题】
-                bool isLocalTransaction = false;
 
-                try
+            // var firstClient = rulesByClient.FirstOrDefault()?.Key;
+            // if (firstClient != null 
+            //     && firstClient.CurrentConnectionConfig.DbType == DbType.Sqlite
+            //     && rulesByClient.Select(x => x.Key).Distinct().Count() > 1)
+            // {
+            //     throw new InvalidOperationException(
+            //         "SQLite does not support SavePolicy across multiple SqlSugarClient instances. " +
+            //         "Please ensure all policy types route to the same SqlSugarClient when using SQLite.");
+            // }
+            
+            // =========================================================
+            // ✅ 事务判断：是否存在外部事务（ABP UOW 等）
+            // =========================================================
+            bool hasOuterTransaction = primaryClient.Ado.IsAnyTran();
+            bool isLocalTransaction = false;
+
+            try
+            {
+                // =====================================================
+                // ✅ 若无外部事务，由 Adapter 自行开启
+                // =====================================================
+                if (!hasOuterTransaction)
                 {
-                    // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
-                    if (!client.Ado.IsAnyTran())
-                    {
-                        client.Ado.BeginTran();
-                        isLocalTransaction = true;
-                    }
-                    
-                    // 使用 .AS() 方法指定目标表
+                    primaryClient.Ado.BeginTran();
+                    isLocalTransaction = true;
+                }
+
+                // =====================================================
+                // ✅ 执行所有策略组（逻辑原子）
+                // =====================================================
+                foreach (var group in rulesByClient)
+                {
+                    var client = group.Key;
+                    var firstRule = group.FirstOrDefault();
+                    if (firstRule == null)
+                        continue;
+
+                    // 获取策略类型对应的表名（支持多 Schema）
+                    var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
+
+                    // -----------------------------
+                    // DELETE
+                    // -----------------------------
                     if (!string.IsNullOrEmpty(tableName))
                     {
-                        await client.Deleteable<CasbinRule>().AS(tableName).ExecuteCommandAsync();
+                        await client.Deleteable<CasbinRule>()
+                            .AS(tableName)
+                            .ExecuteCommandAsync();
                     }
                     else
                     {
-                        await client.Deleteable<CasbinRule>().ExecuteCommandAsync();
+                        await client.Deleteable<CasbinRule>()
+                            .ExecuteCommandAsync();
                     }
-                    
+
+                    // -----------------------------
+                    // INSERT
+                    // -----------------------------
                     var rulesToSave = OnSavePolicy(store, group).ToList();
-                    if (rulesToSave.Any())
+                    if (rulesToSave.Count > 0)
                     {
                         if (!string.IsNullOrEmpty(tableName))
                         {
-                            await client.Insertable(rulesToSave).AS(tableName).ExecuteCommandAsync();
+                            await client.Insertable(rulesToSave)
+                                .AS(tableName)
+                                .ExecuteCommandAsync();
                         }
                         else
                         {
-                            await client.Insertable(rulesToSave).ExecuteCommandAsync();
+                            await client.Insertable(rulesToSave)
+                                .ExecuteCommandAsync();
                         }
                     }
-                    
-                    // 仅当是本地开启的事务时才提交
-                    if (isLocalTransaction)
-                    {
-                        client.Ado.CommitTran();
-                    }
                 }
-                catch (Exception ex)
+
+                // =====================================================
+                // ✅ 提交事务（仅限本地事务）
+                // =====================================================
+                if (isLocalTransaction)
                 {
-                    // 仅当是本地开启的事务时才回滚
-                    if (isLocalTransaction)
-                    {
-                        client.Ado.RollbackTran();
-                    }
-                    // 收集异常但继续处理其他组，实现非原子性行为
-                    exceptions.Add(ex);
+                    primaryClient.Ado.CommitTran();
                 }
             }
-            
-            // 如果有任何异常发生，抛出聚合异常
-            if (exceptions.Count > 0)
+            catch
             {
-                throw new AggregateException("One or more save operations failed", exceptions);
+                // =====================================================
+                // ✅ 回滚事务（仅限本地事务）
+                // =====================================================
+                if (isLocalTransaction)
+                {
+                    primaryClient.Ado.RollbackTran();
+                }
+
+                // ❗ 不吞异常，保证调用方感知失败
+                throw;
             }
+
+            // // 收集所有操作过程中的异常
+            // var exceptions = new List<Exception>();
+            
+            // // 【多 Schema 支持】遍历每个策略组，为每个 client 执行独立事务
+            // foreach (var group in rulesByClient)
+            // {
+            //     var client = group.Key;
+            //     var firstRule = group.FirstOrDefault();
+            //     if (firstRule == null) continue;
+                
+            //     // 获取此策略类型对应的完全限定表名
+            //     var tableName = _clientProvider.GetTableNameForPolicyType(firstRule.PType);
+                
+            //     // 【2026/01/30 修复 SQLite 锁问题】
+            //     bool isLocalTransaction = false;
+
+            //     try
+            //     {
+            //         // 【2026/01/30 优化 - P1】使用 IsAnyTran() 语义更清晰
+            //         if (!client.Ado.IsAnyTran())
+            //         {
+            //             client.Ado.BeginTran();
+            //             isLocalTransaction = true;
+            //         }
+                    
+            //         // 使用 .AS() 方法指定目标表
+            //         if (!string.IsNullOrEmpty(tableName))
+            //         {
+            //             await client.Deleteable<CasbinRule>().AS(tableName).ExecuteCommandAsync();
+            //         }
+            //         else
+            //         {
+            //             await client.Deleteable<CasbinRule>().ExecuteCommandAsync();
+            //         }
+                    
+            //         var rulesToSave = OnSavePolicy(store, group).ToList();
+            //         if (rulesToSave.Any())
+            //         {
+            //             if (!string.IsNullOrEmpty(tableName))
+            //             {
+            //                 await client.Insertable(rulesToSave).AS(tableName).ExecuteCommandAsync();
+            //             }
+            //             else
+            //             {
+            //                 await client.Insertable(rulesToSave).ExecuteCommandAsync();
+            //             }
+            //         }
+                    
+            //         // 仅当是本地开启的事务时才提交
+            //         if (isLocalTransaction)
+            //         {
+            //             client.Ado.CommitTran();
+            //         }
+            //     }
+            //     catch (Exception ex)
+            //     {
+            //         // 仅当是本地开启的事务时才回滚
+            //         if (isLocalTransaction)
+            //         {
+            //             client.Ado.RollbackTran();
+            //         }
+            //         // 收集异常但继续处理其他组，实现非原子性行为
+            //         exceptions.Add(ex);
+            //     }
+            // }
+            
+            // // 如果有任何异常发生，抛出聚合异常
+            // if (exceptions.Count > 0)
+            // {
+            //     throw new AggregateException("One or more save operations failed", exceptions);
+            // }
         }
         
         #endregion

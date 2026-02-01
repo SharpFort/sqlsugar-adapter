@@ -8,7 +8,7 @@
 
   <PropertyGroup>
     <PackageId>Casbin.NET.Adapter.SqlSugar</PackageId>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Authors>SharpFort</Authors>
     <Company>SharpFort</Company>
     <Description>SqlSugar adapter for Casbin.NET. High-performance access control library supporting multi-context scenarios, atomic transactions, and all SqlSugar-supported databases (MySQL, PostgreSQL, SQL Server, SQLite, Oracle, etc.).</Description>
