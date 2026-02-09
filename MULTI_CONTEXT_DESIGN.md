@@ -141,6 +141,7 @@ catch
 **Key Requirement:** All involved `ISqlSugarClient` instances must have their `Ado.Connection` property set to the exact same `DbConnection` object instance.
 
 ### Database Support
+It is recommended not to use SQLite in project development, as the current configuration scheme may lead to transaction conflicts: SQLite Error 5: 'database is locked'. No solution has been found yet. Please directly use PostgreSQL
 
 | Database | Same Schema | Different Schemas | Different Tables | Separate Files | Atomic Tx |
 |----------|-------------|-------------------|------------------|----------------|-----------|

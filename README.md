@@ -29,7 +29,7 @@ This adapter includes comprehensive test coverage with detailed documentation ex
 
 ## ✨ Features
 
-- 🔌 **Universal Support**: Works with MySQL, SQL Server, PostgreSQL, SQLite, Oracle, and more.
+- 🔌 **Universal Support**: Works with MySQL, SQL Server, PostgreSQL, Oracle, and more.
 - ⚛️ **Atomic Transactions**: Full support for multi-context transactional integrity.
 - 🚀 **Performance**: Optimized for high-throughput policy evaluation.
 - 🎯 **Targets**: Native support for .NET 8.0, 9.0, and 10.0.

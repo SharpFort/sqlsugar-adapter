@@ -29,7 +29,7 @@
 
 ## ✨ 功能特性
 
-- 🔌 **通用支持**：完美支持 MySQL, SQL Server, PostgreSQL, SQLite, Oracle 等所有 SqlSugar 支持的数据库。
+- 🔌 **通用支持**：完美支持 MySQL, SQL Server, PostgreSQL, Oracle 等所有 SqlSugar 支持的数据库。
 - ⚛️ **原子事务**：完全支持多上下文（Multi-Context）操作的事务一致性。
 - 🚀 **高性能**：针对高吞吐量策略评估进行了优化。
 - 🎯 **运行环境**：原生支持 .NET 8.0, 9.0, 10.0。
